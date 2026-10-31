@@ -73,3 +73,4 @@ export function RetractionAlertsView({ alerts }: Props) {
     </div>
   );
 }
+

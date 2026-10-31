@@ -12,16 +12,33 @@ import {
 } from './schemas';
 import { Paper, Claim, ExperimentalContext, ResearchGap } from '@/types';
 
+function cleanJsonOutput(raw: string): string {
+  let text = raw.trim();
+  if (text.startsWith('```')) {
+    text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+  }
+  return text;
+}
+
 export class LLMService {
   private provider: string;
   private apiKey?: string;
+  private ollamaBaseUrl: string;
+  private ollamaModel: string;
 
   constructor() {
-    this.provider = (process.env.LLM_PROVIDER || 'gemini').toLowerCase();
+    this.provider = (process.env.LLM_PROVIDER || 'ollama').toLowerCase();
     this.apiKey =
       process.env.GEMINI_API_KEY ||
       process.env.OPENAI_API_KEY ||
       process.env.ANTHROPIC_API_KEY;
+    this.ollamaBaseUrl = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
+    this.ollamaModel = process.env.OLLAMA_MODEL || 'gpt-oss:120b-cloud';
+  }
+
+  private canCallLLM(): boolean {
+    if (this.provider === 'ollama') return true;
+    return !!this.apiKey;
   }
 
   /**
@@ -70,10 +87,10 @@ Return ONLY a valid JSON object matching this schema:
 `;
 
     // Try external LLM if API key is present
-    if (this.apiKey) {
+    if (this.canCallLLM()) {
       try {
         const responseJson = await this.callLLM(prompt);
-        const parsed = JSON.parse(responseJson);
+        const parsed = JSON.parse(cleanJsonOutput(responseJson));
         const validated = ClaimExtractionSchema.safeParse(parsed);
         if (validated.success) return validated.data;
       } catch (err: any) {
@@ -123,10 +140,10 @@ Return ONLY a valid JSON object matching this schema:
 }
 `;
 
-    if (this.apiKey) {
+    if (this.canCallLLM()) {
       try {
         const responseJson = await this.callLLM(prompt);
-        const parsed = JSON.parse(responseJson);
+        const parsed = JSON.parse(cleanJsonOutput(responseJson));
         const validated = ContextComparisonSchema.safeParse(parsed);
         if (validated.success) return validated.data;
       } catch (err: any) {
@@ -172,10 +189,10 @@ Return ONLY a valid JSON object with schema:
 }
 `;
 
-    if (this.apiKey) {
+    if (this.canCallLLM()) {
       try {
         const responseJson = await this.callLLM(prompt);
-        const parsed = JSON.parse(responseJson);
+        const parsed = JSON.parse(cleanJsonOutput(responseJson));
         const validated = GapDiscoverySchema.safeParse(parsed);
         if (validated.success) return validated.data;
       } catch (err: any) {
@@ -229,10 +246,10 @@ Return ONLY a valid JSON object matching:
 }
 `;
 
-    if (this.apiKey) {
+    if (this.canCallLLM()) {
       try {
         const responseJson = await this.callLLM(prompt);
-        const parsed = JSON.parse(responseJson);
+        const parsed = JSON.parse(cleanJsonOutput(responseJson));
         const validated = GapFalsificationSchema.safeParse(parsed);
         if (validated.success) return validated.data;
       } catch (err: any) {
@@ -293,10 +310,10 @@ Return ONLY a valid JSON object adhering to this schema:
 }
 `;
 
-    if (this.apiKey) {
+    if (this.canCallLLM()) {
       try {
         const responseJson = await this.callLLM(prompt);
-        const parsed = JSON.parse(responseJson);
+        const parsed = JSON.parse(cleanJsonOutput(responseJson));
         const validated = ExperimentPlanSchema.safeParse(parsed);
         if (validated.success) return validated.data;
       } catch (err: any) {
@@ -633,6 +650,41 @@ Return ONLY a valid JSON object adhering to this schema:
   }
 
   private async callLLM(prompt: string): Promise<string> {
+    // 1. Local Ollama Integration (e.g. gpt-oss:120b-cloud)
+    if (this.provider === 'ollama') {
+      const url = `${this.ollamaBaseUrl}/api/chat`;
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 120000);
+
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
+          body: JSON.stringify({
+            model: this.ollamaModel,
+            messages: [{ role: 'user', content: prompt }],
+            format: 'json',
+            stream: false,
+            options: {
+              temperature: 0.2,
+            }
+          })
+        });
+        clearTimeout(timeout);
+
+        if (!res.ok) {
+          throw new Error(`Ollama HTTP ${res.status}: ${res.statusText}`);
+        }
+
+        const data = await res.json();
+        return data.message?.content || '{}';
+      } catch (err: any) {
+        clearTimeout(timeout);
+        throw err;
+      }
+    }
+
     if (this.provider === 'gemini' && process.env.GEMINI_API_KEY) {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`;
       const res = await fetch(url, {

@@ -8,7 +8,11 @@ export async function GET() {
     arxiv: true,
     tinyfish: !!process.env.TINYFISH_API_KEY,
     supabase: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
-    llm: process.env.LLM_PROVIDER || 'deterministic_fallback'
+    llm: {
+      provider: process.env.LLM_PROVIDER || 'ollama',
+      model: process.env.OLLAMA_MODEL || 'gpt-oss:120b-cloud',
+      ollama_url: process.env.OLLAMA_BASE_URL || 'http://localhost:11434',
+    }
   };
 
   return NextResponse.json({

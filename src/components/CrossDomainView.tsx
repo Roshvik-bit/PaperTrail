@@ -104,3 +104,4 @@ export function CrossDomainView({ connections }: Props) {
     </div>
   );
 }
+

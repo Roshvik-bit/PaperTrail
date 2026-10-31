@@ -61,7 +61,12 @@ export function Navigation() {
         </div>
 
         {/* Right side status & action */}
-        <div className="flex items-center space-x-4">
+        <div className="flex items-center space-x-3">
+          <div className="hidden xl:flex items-center space-x-1.5 px-3 py-1 rounded-full bg-surface border border-accent/30 text-xs font-mono text-accent">
+            <span className="w-2 h-2 rounded-full bg-accent animate-pulse" />
+            <span>Ollama: gpt-oss:120b-cloud</span>
+          </div>
+
           <div className="hidden lg:flex items-center space-x-2 px-3 py-1 rounded-full bg-surface border border-border text-xs text-content-secondary">
             <Cpu className="w-3.5 h-3.5 text-secondary" />
             <span>Active Domain:</span>

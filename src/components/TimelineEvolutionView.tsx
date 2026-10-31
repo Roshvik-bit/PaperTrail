@@ -120,3 +120,4 @@ export function TimelineEvolutionView({ sessionId, events, onCheckEvolution }: P
     </div>
   );
 }
+

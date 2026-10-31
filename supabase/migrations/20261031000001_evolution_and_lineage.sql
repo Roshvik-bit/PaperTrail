@@ -108,3 +108,4 @@ CREATE INDEX IF NOT EXISTS idx_retraction_paper ON retraction_alerts(paper_id);
 CREATE INDEX IF NOT EXISTS idx_datasets_repo ON datasets(source_repository);
 CREATE INDEX IF NOT EXISTS idx_evolution_session ON evidence_evolution_events(session_id);
 CREATE INDEX IF NOT EXISTS idx_monitors_session ON research_monitors(session_id);
+
