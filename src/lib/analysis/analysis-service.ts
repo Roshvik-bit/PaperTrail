@@ -39,13 +39,15 @@ export class ResearchAnalysisService {
     const allClaims: Claim[] = [];
     const contexts: ExperimentalContext[] = [];
 
-    // Stage 1: Scientific Claim & Context Extraction (Optimized batching)
-    // Process papers concurrently in small batches to prevent sequential HTTP blocking
-    const papersToExtract = papers.slice(0, 8); // Priority top 8 papers for deep extraction
-    const extractionPromises = papersToExtract.map(async (paper) => {
+    // Stage 1: Scientific Claim & Context Extraction (Optimized responsive batching)
+    // Run deep LLM extraction on top 3 landmark papers; use high-precision deterministic extraction for remainder
+    const papersToExtract = papers.slice(0, 8);
+    const extractionPromises = papersToExtract.map(async (paper, index) => {
       let existingClaims = await this.repo.getClaimsForPaper(paper.id);
       if (existingClaims.length === 0) {
-        const extraction = await this.llm.extractClaimsAndContext(paper);
+        // Deep LLM extraction for top 3 landmark papers, instant deterministic extraction for supporting papers
+        const isSupportingPaper = index >= 3;
+        const extraction = await this.llm.extractClaimsAndContext(paper, isSupportingPaper);
 
         const newClaims: Claim[] = extraction.claims.map((c, idx) => ({
           id: `claim_${paper.id}_${idx + 1}`,
@@ -122,11 +124,11 @@ export class ResearchAnalysisService {
           (claimB.claim_type === 'FINDING' || claimB.claim_type === 'LIMITATION')
         ) {
           candidatePairs.push({ claimA, claimB });
-          // Cap candidate pairs to top 6 to prevent combinatorial explosion & timeout
-          if (candidatePairs.length >= 6) break;
+          // Cap candidate pairs to top 3 to prevent combinatorial explosion & excessive queuing
+          if (candidatePairs.length >= 3) break;
         }
       }
-      if (candidatePairs.length >= 6) break;
+      if (candidatePairs.length >= 3) break;
     }
 
     const relationships: EvidenceRelationship[] = [];

@@ -99,7 +99,7 @@ export class LLMService {
   /**
    * Capability A: Extract scientific claims and experimental context from a research paper
    */
-  async extractClaimsAndContext(paper: Paper): Promise<ClaimExtractionOutput> {
+  async extractClaimsAndContext(paper: Paper, useDeterministicOnly = false): Promise<ClaimExtractionOutput> {
     const prompt = `
 You are PaperTrail's Scientific Claim Extraction Engine.
 Extract verified scientific claims, experimental context, metrics, hardware, and stated limitations from the provided research paper text.
@@ -141,8 +141,8 @@ Return ONLY a valid JSON object matching this schema:
 }
 `;
 
-    // Try external LLM if API key is present
-    if (this.canCallLLM()) {
+    // Try external LLM if API key is present and deterministic-only is not forced
+    if (!useDeterministicOnly && this.canCallLLM()) {
       try {
         const responseJson = await this.callLLM(prompt);
         const parsed = safeJsonParse(responseJson);
@@ -713,8 +713,8 @@ Return ONLY a valid JSON object adhering to this schema:
     if (this.provider === 'ollama') {
       const url = `${this.ollamaBaseUrl}/api/chat`;
       const controller = new AbortController();
-      // Safe 20s timeout to prevent hanging on queued/slow cloud models
-      const timeout = setTimeout(() => controller.abort(), 20000);
+      // Safe 12s timeout to prevent hanging on queued/slow cloud models while allowing local models to respond
+      const timeout = setTimeout(() => controller.abort(), 12000);
 
       try {
         const res = await fetch(url, {
