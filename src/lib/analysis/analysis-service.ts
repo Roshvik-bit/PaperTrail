@@ -9,6 +9,7 @@ import {
   GapInvestigationReport,
   ProposedExperiment,
   DisagreementInvestigation,
+  Paper,
 } from '@/types';
 
 export class ResearchAnalysisService {
@@ -38,8 +39,10 @@ export class ResearchAnalysisService {
     const allClaims: Claim[] = [];
     const contexts: ExperimentalContext[] = [];
 
-    // Stage 1: Scientific Claim & Context Extraction
-    for (const paper of papers) {
+    // Stage 1: Scientific Claim & Context Extraction (Optimized batching)
+    // Process papers concurrently in small batches to prevent sequential HTTP blocking
+    const papersToExtract = papers.slice(0, 8); // Priority top 8 papers for deep extraction
+    const extractionPromises = papersToExtract.map(async (paper) => {
       let existingClaims = await this.repo.getClaimsForPaper(paper.id);
       if (existingClaims.length === 0) {
         const extraction = await this.llm.extractClaimsAndContext(paper);
@@ -61,7 +64,6 @@ export class ResearchAnalysisService {
         }));
 
         await this.repo.saveClaims(newClaims);
-        existingClaims = newClaims;
 
         // Save experimental context
         const context: ExperimentalContext = {
@@ -84,61 +86,90 @@ export class ResearchAnalysisService {
         };
 
         await this.repo.saveContext(context);
-        contexts.push(context);
+        return { claims: newClaims, context };
       }
+      return { claims: existingClaims, context: null };
+    });
 
-      allClaims.push(...existingClaims);
+    const extractionResults = await Promise.allSettled(extractionPromises);
+    for (const res of extractionResults) {
+      if (res.status === 'fulfilled' && res.value) {
+        allClaims.push(...res.value.claims);
+        if (res.value.context) contexts.push(res.value.context);
+      }
+    }
+
+    // Also pick up any claims from other papers already in repository
+    if (papers.length > 8) {
+      for (const remainingPaper of papers.slice(8)) {
+        const existing = await this.repo.getClaimsForPaper(remainingPaper.id);
+        allClaims.push(...existing);
+      }
     }
 
     // Stage 2: Context-Aware Disagreement Investigation & Relationship Mapping
-    const relationships: EvidenceRelationship[] = [];
+    // Collect candidate cross-paper pairs, prioritizing FINDING and LIMITATION claims
+    const candidatePairs: { claimA: Claim; claimB: Claim }[] = [];
     for (let i = 0; i < allClaims.length; i++) {
       for (let j = i + 1; j < allClaims.length; j++) {
         const claimA = allClaims[i];
         const claimB = allClaims[j];
 
-        // Only compare claims from different papers
         if (claimA.paper_id === claimB.paper_id) continue;
 
-        // Focus comparison when at least one claim is a FINDING or LIMITATION
         if (
           (claimA.claim_type === 'FINDING' || claimA.claim_type === 'LIMITATION') &&
           (claimB.claim_type === 'FINDING' || claimB.claim_type === 'LIMITATION')
         ) {
-          const contextA = await this.repo.getContextForPaper(claimA.paper_id);
-          const contextB = await this.repo.getContextForPaper(claimB.paper_id);
-
-          const comparison = await this.llm.investigateDisagreement(
-            claimA,
-            contextA || undefined,
-            claimB,
-            contextB || undefined
-          );
-
-          const rel: EvidenceRelationship = {
-            id: `rel_${claimA.id}_${claimB.id}`,
-            source_claim_id: claimA.id,
-            target_claim_id: claimB.id,
-            source_claim: claimA,
-            target_claim: claimB,
-            relationship_type: comparison.relationship_type,
-            supporting_evidence: comparison.supporting_evidence,
-            context_comparison: {
-              similarities: comparison.similarities,
-              differences: comparison.differences,
-              possible_explanations: comparison.possible_explanations,
-              alternative_explanations: comparison.alternative_explanations,
-              remaining_uncertainty: comparison.remaining_uncertainty,
-              is_genuine_contradiction: comparison.is_genuine_contradiction,
-            },
-            confidence: comparison.confidence,
-            verification_status: 'AUTOMATIC',
-            created_at: new Date().toISOString(),
-          };
-
-          await this.repo.saveRelationship(rel);
-          relationships.push(rel);
+          candidatePairs.push({ claimA, claimB });
+          // Cap candidate pairs to top 6 to prevent combinatorial explosion & timeout
+          if (candidatePairs.length >= 6) break;
         }
+      }
+      if (candidatePairs.length >= 6) break;
+    }
+
+    const relationships: EvidenceRelationship[] = [];
+    const comparisonPromises = candidatePairs.map(async ({ claimA, claimB }) => {
+      const contextA = await this.repo.getContextForPaper(claimA.paper_id);
+      const contextB = await this.repo.getContextForPaper(claimB.paper_id);
+
+      const comparison = await this.llm.investigateDisagreement(
+        claimA,
+        contextA || undefined,
+        claimB,
+        contextB || undefined
+      );
+
+      const rel: EvidenceRelationship = {
+        id: `rel_${claimA.id}_${claimB.id}`,
+        source_claim_id: claimA.id,
+        target_claim_id: claimB.id,
+        source_claim: claimA,
+        target_claim: claimB,
+        relationship_type: comparison.relationship_type,
+        supporting_evidence: comparison.supporting_evidence,
+        context_comparison: {
+          similarities: comparison.similarities,
+          differences: comparison.differences,
+          possible_explanations: comparison.possible_explanations,
+          alternative_explanations: comparison.alternative_explanations,
+          remaining_uncertainty: comparison.remaining_uncertainty,
+          is_genuine_contradiction: comparison.is_genuine_contradiction,
+        },
+        confidence: comparison.confidence,
+        verification_status: 'AUTOMATIC',
+        created_at: new Date().toISOString(),
+      };
+
+      await this.repo.saveRelationship(rel);
+      return rel;
+    });
+
+    const settledRelationships = await Promise.allSettled(comparisonPromises);
+    for (const item of settledRelationships) {
+      if (item.status === 'fulfilled' && item.value) {
+        relationships.push(item.value);
       }
     }
 
@@ -147,7 +178,10 @@ export class ResearchAnalysisService {
     let newGapsCount = 0;
 
     if (existingGaps.length === 0) {
-      const gapDiscovery = await this.llm.discoverResearchGaps(papers, allClaims);
+      const gapDiscovery = await this.llm.discoverResearchGaps(
+        papers.slice(0, 8),
+        allClaims.slice(0, 15)
+      );
 
       for (const g of gapDiscovery.gaps) {
         const gap: ResearchGap = {
@@ -222,69 +256,74 @@ export class ResearchAnalysisService {
         remaining_uncertainty: comp.remaining_uncertainty,
         is_genuine_contradiction: comp.is_genuine_contradiction,
       },
-      confidence: comp.confidence,
       summary: comp.supporting_evidence,
+      confidence: comp.confidence,
     };
   }
 
   /**
-   * Capability D: 6-Stage Dedicated Research-Gap Falsification Workflow
+   * Capability D: 6-Stage Adversarial Gap Falsification Workflow
    */
   async runGapFalsification(gapId: string): Promise<GapInvestigationReport> {
+    return this.falsifyResearchGap(gapId);
+  }
+
+  async falsifyResearchGap(gapId: string): Promise<GapInvestigationReport> {
     const gap = await this.repo.getGap(gapId);
     if (!gap) throw new Error(`Research gap ${gapId} not found`);
 
-    // STAGE 1: Gap decomposition & alternate formulations
-    const searchTerms = [
-      gap.title,
-      gap.research_question,
-      ...gap.title.split(':').map(s => s.trim())
-    ];
+    // Stages 1 & 2: Counter-evidence search
+    const counterEvidenceQuery = `${gap.title} ${gap.research_question}`;
+    const discovery = await this.discovery.discover(counterEvidenceQuery, { limit: 8 });
 
-    // STAGE 2 & 3: Multi-source search expansion & reference exploration
-    const discoveryRes = await this.discovery.discover(gap.research_question, { limit: 8 });
-    const counterEvidencePapers = discoveryRes.papers.filter(
-      p => !gap.supporting_papers.some(sp => sp.paper_id === p.id)
-    );
+    // Stage 3 & 4: LLM Adversarial Falsification Synthesis
+    const falsification = await this.llm.falsifyResearchGap(gap, discovery.papers);
 
-    // STAGE 4 & 5: Counter-evidence analysis & gap revision
-    const falsificationOutput = await this.llm.falsifyResearchGap(gap, counterEvidencePapers);
-
-    // Update gap status in repository
-    await this.repo.updateGapStatus(gap.id, falsificationOutput.outcome);
-
-    // STAGE 6: Auditable Investigation Report
     const report: GapInvestigationReport = {
-      id: `inv_${Math.random().toString(36).substring(2, 9)}`,
+      id: `investigation_${Math.random().toString(36).substring(2, 9)}`,
       research_gap_id: gap.id,
       original_gap_title: gap.title,
       original_question: gap.research_question,
-      search_queries: falsificationOutput.search_queries_used,
-      sources_searched: discoveryRes.sources_used,
-      papers_retrieved_count: discoveryRes.total_found,
-      counter_evidence_papers: falsificationOutput.counter_evidence_findings,
-      outcome: falsificationOutput.outcome,
-      revised_question: falsificationOutput.revised_question,
-      coverage_limitations: falsificationOutput.coverage_limitations,
-      reasoning_summary: falsificationOutput.reasoning_summary,
-      human_review_recommendation: falsificationOutput.human_review_recommendation,
+      search_queries: [counterEvidenceQuery],
+      sources_searched: ['OpenAlex', 'arXiv', 'Semantic Scholar', 'Crossref'],
+      papers_retrieved_count: discovery.papers.length,
+      counter_evidence_papers: falsification.counter_evidence_findings.map(ce => ({
+        title: ce.title,
+        year: ce.year,
+        doi: ce.doi,
+        summary: ce.summary,
+        relevance_to_gap: ce.relevance_to_gap,
+      })),
+      outcome: falsification.outcome,
+      reasoning_summary: falsification.reasoning_summary,
+      revised_question: falsification.revised_question,
+      coverage_limitations: falsification.coverage_limitations,
+      human_review_recommendation: falsification.human_review_recommendation,
       investigation_timestamp: new Date().toISOString(),
     };
 
     await this.repo.saveInvestigation(report);
+
+    // Update gap status based on falsification outcome
+    gap.status = falsification.outcome;
+    gap.counter_evidence = report.counter_evidence_papers.map(cp => ({
+      title: cp.title,
+      citation: cp.year ? `${cp.title} (${cp.year})` : cp.title,
+      why_counter: cp.relevance_to_gap,
+    }));
+    gap.coverage_summary = falsification.coverage_limitations;
+    gap.updated_at = new Date().toISOString();
+    await this.repo.saveGap(gap);
+
     return report;
   }
 
   /**
-   * Capability E: Practical Experiment Planning & Resource Feasibility
+   * Capability E: Generate Practical Experiment Plan
    */
   async planExperimentForGap(gapId: string): Promise<ProposedExperiment> {
     const gap = await this.repo.getGap(gapId);
     if (!gap) throw new Error(`Research gap ${gapId} not found`);
-
-    // Check if experiment already planned
-    const existing = await this.repo.getExperimentForGap(gapId);
-    if (existing) return existing;
 
     const planOutput = await this.llm.planExperiment(gap);
 

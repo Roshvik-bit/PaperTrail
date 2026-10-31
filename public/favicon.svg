@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none">
+  <rect width="48" height="48" rx="8" fill="#FDFCF9" stroke="#E3E1D9" stroke-width="1.5" />
+  
+  {/* Left Book Cover / Page (Terracotta) */}
+  <path d="M12 18V36L15 35V20H23V16H12Z" fill="#B96645" />
+  <path d="M16 16C21 16 28 17 32 21V38C28 35 21 34 16 34V16Z" fill="#C05C33" />
+  
+  {/* Right Book Page (Olive Sage) */}
+  <path d="M33 21C36 19 39 18 41 18V34C39 34 36 35 33 37V21Z" fill="#4F5A47" />
+
+  {/* Dynamic Research Trail Swoop */}
+  <path d="M10 40C16 38 24 33 32 26C38 21 44 14 42 10C40 7 34 8 28 12" stroke="#B96645" stroke-width="2.5" stroke-linecap="round" fill="none" />
+</svg>

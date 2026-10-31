@@ -546,4 +546,286 @@ describe('TinyMonitor & Scholarly Polling Resilience', async () => {
   });
 });
 
+// Test 14: Research Export Engine
+describe('Research Export Engine & Multi-Format Serialization', async () => {
+  const { PaperTrailRepository } = await import('../src/lib/db/repository.ts');
+  const { ResearchExportService } = await import('../src/lib/export/export-service.ts');
+  const { extractZipArchive } = await import('../src/lib/export/zip-utils.ts');
+
+  const repo = new PaperTrailRepository();
+  let testSessionId = '';
+
+  test('generates complete organized ZIP archive with manifest, dossiers, and protocols', async () => {
+    const session = await repo.createSession('Export Test Session', 'How does INT4 AWQ compare with FP16?');
+    testSessionId = session.id;
+
+    await repo.savePaper({
+      id: 'paper_awq_exp',
+      title: 'AWQ: Activation-aware Weight Quantization for LLM Compression',
+      abstract: 'Protects salient weights to retain LLM perplexity on edge devices.',
+      authors: [{ name: 'Ji Lin' }, { name: 'Song Han' }],
+      year: 2024,
+      doi: '10.5555/awq.2024',
+      open_access_status: 'gold',
+      full_text_status: 'open_access_pdf',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }, session.id);
+
+    await repo.saveClaims([{
+      id: 'claim_awq_exp_1',
+      paper_id: 'paper_awq_exp',
+      claim_text: 'AWQ preserves 4-bit perplexity within 0.1 delta across reasoning tasks.',
+      claim_type: 'BENCHMARK_RESULT',
+      supporting_passage: 'Across reasoning benchmarks, AWQ maintains FP16 perplexity within 0.1.',
+      extraction_confidence: 0.94,
+      verification_status: 'AUTOMATICALLY_EXTRACTED',
+      extraction_version: 'v1.0.0',
+      created_at: new Date().toISOString(),
+    }]);
+
+    await repo.saveGap({
+      id: 'gap_exp_1',
+      session_id: session.id,
+      title: 'Thermal degradation in sustained edge quantization',
+      research_question: 'Does AWQ burst performance degrade under thermal throttling?',
+      description: 'Lack of long-running thermal evaluations.',
+      gap_type: 'UNINVESTIGATED_HARDWARE_ENV',
+      supporting_papers: [{ paper_id: 'paper_awq_exp', title: 'AWQ Paper' }],
+      counter_evidence: [],
+      coverage_summary: 'Scholarly index evaluated',
+      confidence: 0.88,
+      status: 'RETAINED_CANDIDATE',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+
+    const bundle = await repo.getCompleteResearchBundle(session.id);
+    assert.ok(bundle, 'Research bundle must be non-null');
+    assert.equal(bundle.papers.length, 1);
+    assert.equal(bundle.claims.length, 1);
+    assert.equal(bundle.gaps.length, 1);
+
+    // Export ZIP
+    const exportedZip = ResearchExportService.exportBundle(bundle, 'zip');
+    assert.ok(exportedZip.filename.endsWith('.zip'));
+    assert.equal(exportedZip.mimeType, 'application/zip');
+    assert.ok(Buffer.isBuffer(exportedZip.data));
+    assert.ok(exportedZip.data.length > 500, 'ZIP file must have substantial binary content');
+
+    // Inspect ZIP structure
+    const entries = extractZipArchive(exportedZip.data);
+    assert.ok(entries['manifest.json'], 'Must contain manifest.json');
+    assert.ok(entries['README.md'], 'Must contain README.md');
+    assert.ok(entries['papers/papers.json'], 'Must contain papers/papers.json');
+    assert.ok(entries['papers/papers.csv'], 'Must contain papers/papers.csv');
+    assert.ok(entries['claims/claims.json'], 'Must contain claims/claims.json');
+    assert.ok(entries['research-gaps/gaps.json'], 'Must contain research-gaps/gaps.json');
+    assert.ok(entries['reports/research_brief.md'], 'Must contain reports/research_brief.md');
+    assert.ok(entries['reports/research_brief.html'], 'Must contain reports/research_brief.html');
+
+    const manifest = entries['manifest.json'].json();
+    assert.equal(manifest.format_version, '1.0.0');
+    assert.equal(manifest.app_name, 'PaperTrail');
+    assert.equal(manifest.counts.papers, 1);
+  });
+
+  test('exports valid BibTeX, JSON, and Markdown formats', async () => {
+    const bundle = await repo.getCompleteResearchBundle(testSessionId);
+    assert.ok(bundle);
+
+    // BibTeX
+    const bibtex = ResearchExportService.exportBundle(bundle, 'bibtex');
+    assert.ok(bibtex.filename.endsWith('.bib'));
+    assert.ok(String(bibtex.data).includes('@article{'));
+    assert.ok(String(bibtex.data).includes('Activation-aware Weight Quantization'));
+    assert.ok(String(bibtex.data).includes('Ji Lin'));
+
+    // JSON
+    const jsonExp = ResearchExportService.exportBundle(bundle, 'json');
+    assert.ok(jsonExp.filename.endsWith('.json'));
+    const parsed = JSON.parse(String(jsonExp.data));
+    assert.equal(parsed.manifest.format_version, '1.0.0');
+    assert.equal(parsed.papers[0].id, 'paper_awq_exp');
+
+    // Markdown
+    const mdExp = ResearchExportService.exportBundle(bundle, 'markdown');
+    assert.ok(mdExp.filename.endsWith('.md'));
+    assert.ok(String(mdExp.data).includes('# PaperTrail Scientific Research Brief'));
+    assert.ok(String(mdExp.data).includes('AWQ: Activation-aware Weight Quantization'));
+  });
+});
+
+// Test 15: Safe ZIP Extraction & Security Auditing
+describe('ZIP Security Auditing & Path Traversal Prevention', async () => {
+  const { createZipArchive, extractZipArchive } = await import('../src/lib/export/zip-utils.ts');
+
+  test('safely compresses and extracts files with CRC32 verification', () => {
+    const zip = createZipArchive([
+      { path: 'manifest.json', content: '{"status":"ok"}' },
+      { path: 'papers/test.txt', content: 'Testing content' },
+    ]);
+
+    const extracted = extractZipArchive(zip);
+    assert.equal(extracted['manifest.json'].text(), '{"status":"ok"}');
+    assert.equal(extracted['papers/test.txt'].text(), 'Testing content');
+  });
+
+  test('blocks path traversal attacks attempting directory escape', () => {
+    const maliciousZip = createZipArchive([
+      { path: '../../etc/passwd', content: 'malicious payload' },
+    ]);
+
+    assert.throws(() => {
+      extractZipArchive(maliciousZip);
+    }, /Disallowed path traversal/);
+  });
+});
+
+// Test 16: Research Import Engine & Restoration
+describe('Research Import Engine & Restoration', async () => {
+  const { PaperTrailRepository } = await import('../src/lib/db/repository.ts');
+  const { ResearchImportService } = await import('../src/lib/export/import-service.ts');
+  const { ResearchExportService } = await import('../src/lib/export/export-service.ts');
+
+  const repo = new PaperTrailRepository();
+
+  test('restores complete investigation from ZIP archive without loss of provenance', async () => {
+    const sourceSession = await repo.createSession('Source To Export', 'Does 4-bit quantization preserve safety?');
+    await repo.savePaper({
+      id: 'paper_import_test_1',
+      title: 'Safety Invariants in Quantized Models',
+      abstract: 'Investigates safety drift under edge quantization.',
+      authors: [{ name: 'Researcher Alpha' }],
+      year: 2024,
+      open_access_status: 'green',
+      full_text_status: 'abstract_only',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }, sourceSession.id);
+
+    await repo.saveClaims([{
+      id: 'claim_import_test_1',
+      paper_id: 'paper_import_test_1',
+      claim_text: 'Safety guardrails drift by 14% after aggressive 4-bit weight pruning.',
+      claim_type: 'FINDING',
+      supporting_passage: 'We observe a 14% drift in safety guardrail alignment.',
+      extraction_confidence: 0.91,
+      verification_status: 'CORROBORATED',
+      extraction_version: 'v1.0.0',
+      created_at: new Date().toISOString(),
+    }]);
+
+    const bundle = await repo.getCompleteResearchBundle(sourceSession.id);
+    assert.ok(bundle);
+    const zipExport = ResearchExportService.exportBundle(bundle, 'zip');
+
+    // Import into repository
+    const parsedBundle = ResearchImportService.parseArchive(zipExport.data);
+    assert.equal(parsedBundle.manifest.format_version, '1.0.0');
+    assert.equal(parsedBundle.papers.length, 1);
+    assert.equal(parsedBundle.claims.length, 1);
+
+    const importResult = await repo.importResearchBundle(parsedBundle, { mode: 'CREATE_NEW' });
+    assert.equal(importResult.success, true);
+    assert.ok(importResult.session_id);
+    assert.equal(importResult.imported_counts.papers, 1);
+    assert.equal(importResult.imported_counts.claims, 1);
+
+    // Verify imported session exists in repository
+    const restoredSession = await repo.getSession(importResult.session_id);
+    assert.ok(restoredSession);
+    assert.equal(restoredSession.research_question, sourceSession.research_question);
+
+    const restoredPapers = await repo.getPapersForSession(importResult.session_id);
+    assert.equal(restoredPapers.length, 1);
+    assert.equal(restoredPapers[0].title, 'Safety Invariants in Quantized Models');
+  });
+
+  test('rejects corrupted archives or invalid versions', () => {
+    assert.throws(() => {
+      ResearchImportService.parseArchive(Buffer.from('not a zip file'));
+    }, /Invalid PaperTrail archive/);
+  });
+});
+
+// Test 17: SQLite Research Repository Persistence & Full-Text Search
+describe('Local SQLite Research Repository Engine', async () => {
+  const { SQLiteResearchRepository } = await import('../src/lib/db/sqlite-repository.ts');
+  const sqliteRepo = new SQLiteResearchRepository();
+
+  test('stores, retrieves and updates research records in local SQLite database', async () => {
+    const session = await sqliteRepo.createSession(
+      'SQLite Local Session',
+      'Local-first research storage benchmark',
+      'edge_ai'
+    );
+    assert.ok(session.id);
+
+    const paper = {
+      id: 'paper_sqlite_1',
+      title: 'TinyLlama: An Open-Source Small Language Model on Edge',
+      abstract: 'Trained on 3 trillion tokens for mobile architectures.',
+      authors: [{ name: 'Peiyuan Zhang' }],
+      year: 2024,
+      venue: 'arXiv',
+      open_access_status: 'gold',
+      full_text_status: 'open_access_pdf',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    await sqliteRepo.savePaper(paper, session.id);
+
+    const fetchedPaper = await sqliteRepo.getPaper('paper_sqlite_1');
+    assert.ok(fetchedPaper);
+    assert.equal(fetchedPaper.title, paper.title);
+
+    const sessionPapers = await sqliteRepo.getPapersForSession(session.id);
+    assert.equal(sessionPapers.length, 1);
+
+    // Store Claim
+    await sqliteRepo.saveClaims([{
+      id: 'claim_sqlite_1',
+      paper_id: 'paper_sqlite_1',
+      claim_text: 'TinyLlama achieves 24 tok/sec on Raspberry Pi 5 8GB.',
+      claim_type: 'BENCHMARK_RESULT',
+      supporting_passage: 'Benchmarked on Raspberry Pi 5 achieving 24 tok/sec.',
+      extraction_confidence: 0.95,
+      verification_status: 'AUTOMATICALLY_EXTRACTED',
+      extraction_version: 'v1.0.0',
+      created_at: new Date().toISOString(),
+    }]);
+
+    const sessionClaims = await sqliteRepo.getClaimsForSession(session.id);
+    assert.equal(sessionClaims.length, 1);
+    assert.equal(sessionClaims[0].id, 'claim_sqlite_1');
+
+    // Local Search
+    const searchRes = await sqliteRepo.searchLocal('TinyLlama');
+    assert.ok(searchRes.papers.length >= 1, 'Local search must find paper by keyword');
+    assert.equal(searchRes.papers[0].id, 'paper_sqlite_1');
+
+    // Storage Status
+    const status = await sqliteRepo.getStorageStatus();
+    assert.equal(status.provider, 'sqlite');
+    assert.equal(status.local_database_available, true);
+    assert.ok(status.local_database_size_bytes !== undefined);
+  });
+});
+
+// Test 18: Repository Factory and Storage Abstraction
+describe('Research Repository Factory & Storage Status', async () => {
+  const { getResearchRepository, SupabaseResearchRepository, SQLiteResearchRepository } = await import('../src/lib/db/repository.ts');
+
+  test('instantiates appropriate repository based on provider flag', () => {
+    const supabaseRepo = getResearchRepository('supabase');
+    assert.ok(supabaseRepo instanceof SupabaseResearchRepository);
+
+    const sqliteRepo = getResearchRepository('sqlite');
+    assert.ok(sqliteRepo instanceof SQLiteResearchRepository);
+  });
+});
+
+
 

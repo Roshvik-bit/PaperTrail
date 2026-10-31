@@ -29,3 +29,9 @@ yarn-error.log*
 # TypeScript
 *.tsbuildinfo
 next-env.d.ts
+
+# PaperTrail Local Storage
+.papertrail-data/
+*.db
+*.db-wal
+*.db-shm

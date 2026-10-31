@@ -122,7 +122,7 @@ export class ResearchDiscoveryService {
       // Check TinyFish for external benchmarks/datasets if configured
       if (this.tinyFish.isConfigured()) {
         sourcesUsed.push('TinyFish Autonomous Discovery');
-        externalResources = await this.tinyFish.search(`${trimmed} edge benchmarks datasets`, 5);
+        externalResources = await this.tinyFish.search(`${trimmed} datasets benchmarks`, 5);
       }
     }
 

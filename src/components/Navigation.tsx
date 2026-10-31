@@ -3,42 +3,28 @@
 import React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Compass, Network, GitPullRequest, Flame, Microscope, Cpu, ArrowUpRight } from 'lucide-react';
+import { PaperTrailLogo } from './PaperTrailLogo';
+import { Network, ArrowUpRight, Compass, HardDrive, Sparkles } from 'lucide-react';
 
 export function Navigation() {
   const pathname = usePathname();
 
   const links = [
     { href: '/', label: 'Overview', icon: Compass },
-    { href: '/workspace', label: 'Research Workspace', icon: Network },
+    { href: '/workspace', label: 'Investigation Workspace', icon: Network },
   ];
 
   return (
-    <header className="sticky top-0 z-40 border-b border-border bg-background/90 backdrop-blur-md">
+    <header className="sticky top-0 z-40 border-b border-[#E3E1D9] bg-[#FDFCF9]/90 backdrop-blur-md">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
         {/* Brand */}
         <div className="flex items-center space-x-6">
-          <Link href="/" className="flex items-center space-x-3 group">
-            <div className="w-9 h-9 rounded-lg bg-surface-elevated border border-border group-hover:border-accent/50 flex items-center justify-center transition-colors shadow-inner">
-              <Microscope className="w-5 h-5 text-accent" />
-            </div>
-            <div>
-              <div className="flex items-center space-x-2">
-                <span className="font-bold text-lg text-content-primary tracking-tight font-sans">
-                  Paper<span className="text-accent">Trail</span>
-                </span>
-                <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-accent/10 text-accent border border-accent/20">
-                  v1.0
-                </span>
-              </div>
-              <p className="text-[11px] text-content-secondary hidden sm:block">
-                Evidence-Driven Research Intelligence
-              </p>
-            </div>
+          <Link href="/" className="hover:opacity-90 transition-opacity">
+            <PaperTrailLogo size={28} />
           </Link>
 
           {/* Navigation links */}
-          <nav className="hidden md:flex items-center space-x-1 pl-4 border-l border-border">
+          <nav className="hidden md:flex items-center space-x-1 pl-4 border-l border-[#E3E1D9]">
             {links.map((link) => {
               const Icon = link.icon;
               const isActive = pathname === link.href;
@@ -46,13 +32,13 @@ export function Navigation() {
                 <Link
                   key={link.href}
                   href={link.href}
-                  className={`flex items-center space-x-2 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                  className={`flex items-center space-x-2 px-3 py-1.5 rounded-md text-xs font-mono transition-colors ${
                     isActive
-                      ? 'bg-surface-elevated text-accent border border-border'
-                      : 'text-content-secondary hover:text-content-primary hover:bg-surface'
+                      ? 'bg-[#FAF8F3] text-[#252622] font-semibold border border-[#E3E1D9]'
+                      : 'text-[#777873] hover:text-[#252622] hover:bg-[#FAF8F3]'
                   }`}
                 >
-                  <Icon className="w-4 h-4" />
+                  <Icon className="w-3.5 h-3.5 text-[#B96645]" />
                   <span>{link.label}</span>
                 </Link>
               );
@@ -62,27 +48,26 @@ export function Navigation() {
 
         {/* Right side status & action */}
         <div className="flex items-center space-x-3">
-          <div className="hidden xl:flex items-center space-x-1.5 px-3 py-1 rounded-full bg-surface border border-accent/30 text-xs font-mono text-accent">
-            <span className="w-2 h-2 rounded-full bg-accent animate-pulse" />
-            <span>Ollama: gpt-oss:120b-cloud</span>
+          <div className="hidden xl:flex items-center space-x-1.5 px-3 py-1 rounded bg-[#FAF8F3] border border-[#E3E1D9] text-[11px] font-mono text-[#777873]">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#858B70]" />
+            <span>Multi-Provider Discovery: OpenAlex • arXiv • S2 • Crossref</span>
           </div>
 
-          <div className="hidden lg:flex items-center space-x-2 px-3 py-1 rounded-full bg-surface border border-border text-xs text-content-secondary">
-            <Cpu className="w-3.5 h-3.5 text-secondary" />
-            <span>Active Domain:</span>
-            <span className="font-medium text-content-primary">Edge AI & SLM</span>
+          <div className="hidden sm:flex items-center space-x-1.5 px-3 py-1 rounded bg-[#FAF8F3] border border-[#E3E1D9] text-[11px] font-mono text-[#858B70]">
+            <HardDrive className="w-3.5 h-3.5" />
+            <span>SQLite & Supabase Ready</span>
           </div>
 
           <Link
             href="/workspace"
-            className="inline-flex items-center space-x-2 px-3.5 py-1.5 rounded-lg text-sm font-semibold bg-accent text-background hover:bg-accent-hover transition-all shadow-sm"
+            className="inline-flex items-center space-x-2 px-4 py-2 rounded-lg text-xs font-medium bg-[#252622] text-[#FDFCF9] hover:bg-[#383A34] transition-all shadow-[0_1px_3px_rgba(37,38,34,0.08)] active:scale-[0.98]"
           >
-            <span>Launch Engine</span>
-            <ArrowUpRight className="w-4 h-4" />
+            <Sparkles className="w-3.5 h-3.5 text-[#EFECE5]" />
+            <span>Enter Workspace</span>
+            <ArrowUpRight className="w-3.5 h-3.5" />
           </Link>
         </div>
       </div>
     </header>
   );
 }
-

@@ -27,10 +27,17 @@ export async function POST(
       completed_at: new Date().toISOString(),
     });
 
+    const claims = await repo.getClaimsForSession(session.id);
+    const disagreements = await repo.getRelationshipsForSession(session.id);
+    const gaps = await repo.getGapsForSession(session.id);
+
     return NextResponse.json({
       success: true,
       job_id: job.id,
       analysis: result,
+      claims,
+      disagreements,
+      gaps,
     });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });

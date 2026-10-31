@@ -12,12 +12,67 @@ import {
 } from './schemas';
 import { Paper, Claim, ExperimentalContext, ResearchGap } from '@/types';
 
-function cleanJsonOutput(raw: string): string {
-  let text = raw.trim();
-  if (text.startsWith('```')) {
-    text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+export function cleanJsonOutput(raw: string): string {
+  let text = (raw || '').trim();
+
+  // Strip markdown code blocks
+  text = text.replace(/^```(?:json)?\s*/im, '').replace(/\s*```$/m, '').trim();
+
+  // Extract JSON object or array bounds if text contains conversational prose
+  const firstBrace = text.indexOf('{');
+  const firstBracket = text.indexOf('[');
+  let startIdx = -1;
+  let endIdx = -1;
+
+  if (firstBrace !== -1 && (firstBracket === -1 || firstBrace < firstBracket)) {
+    startIdx = firstBrace;
+    endIdx = text.lastIndexOf('}') + 1;
+  } else if (firstBracket !== -1) {
+    startIdx = firstBracket;
+    endIdx = text.lastIndexOf(']') + 1;
   }
+
+  if (startIdx !== -1 && endIdx > startIdx) {
+    text = text.substring(startIdx, endIdx);
+  }
+
+  // 1. Repair unterminated / dangling decimal points:
+  // e.g. "0." followed by comma, space, newline, or closing brace/bracket -> "0.0"
+  text = text.replace(/(\b\d+)\.(?=[,\s\}\]\r\n]|$)/g, '$1.0');
+
+  // 2. Repair leading dot decimals (e.g. ".85" -> "0.85")
+  text = text.replace(/(:\s*)\.(\d+)/g, '$10.$2');
+
+  // 3. Repair dangling lone decimal point (e.g. ": ." -> ": 0.0")
+  text = text.replace(/:\s*\.(?=[,\s\}\]\r\n]|$)/g, ': 0.0');
+
+  // 4. Insert missing comma between lines when next line begins with a quoted key
+  text = text.replace(/([^\s,\{\[]\s*)\n(\s*"[a-zA-Z0-9_]+"\s*:)/g, '$1,\n$2');
+
+  // 5. Repair trailing commas before closing braces or brackets (e.g. [1, 2,] or {"a": 1,})
+  text = text.replace(/,\s*([\}\]])/g, '$1');
+
   return text;
+}
+
+export function safeJsonParse<T = any>(raw: string): T {
+  const cleaned = cleanJsonOutput(raw);
+  try {
+    return JSON.parse(cleaned);
+  } catch (firstErr: any) {
+    // Secondary aggressive repair pass
+    try {
+      const aggressive = cleaned
+        .replace(/[\x00-\x09\x0B\x0C\x0E-\x1F\x7F]/g, ' ')
+        .replace(/:\s*0\.(?=[^\d])/g, ': 0.0')
+        .replace(/:\s*1\.(?=[^\d])/g, ': 1.0')
+        .replace(/([^\s,\{\[]\s*)\n(\s*"[a-zA-Z0-9_]+"\s*:)/g, '$1,\n$2')
+        .replace(/,\s*([\}\]])/g, '$1');
+      return JSON.parse(aggressive);
+    } catch {
+      throw firstErr;
+    }
+  }
 }
 
 export class LLMService {
@@ -90,7 +145,7 @@ Return ONLY a valid JSON object matching this schema:
     if (this.canCallLLM()) {
       try {
         const responseJson = await this.callLLM(prompt);
-        const parsed = JSON.parse(cleanJsonOutput(responseJson));
+        const parsed = safeJsonParse(responseJson);
         const validated = ClaimExtractionSchema.safeParse(parsed);
         if (validated.success) return validated.data;
       } catch (err: any) {
@@ -138,12 +193,16 @@ Return ONLY a valid JSON object matching this schema:
   "alternative_explanations": ["alternative 1"],
   "remaining_uncertainty": "what remains to be tested"
 }
+
+CRITICAL RULES:
+1. "confidence" must be a full decimal number between 0.0 and 1.0 (e.g. 0.85). Never end a number with a lone decimal point like "0.".
+2. Return strictly valid JSON with no markdown wrapping or conversational prose.
 `;
 
     if (this.canCallLLM()) {
       try {
         const responseJson = await this.callLLM(prompt);
-        const parsed = JSON.parse(cleanJsonOutput(responseJson));
+        const parsed = safeJsonParse(responseJson);
         const validated = ContextComparisonSchema.safeParse(parsed);
         if (validated.success) return validated.data;
       } catch (err: any) {
@@ -192,7 +251,7 @@ Return ONLY a valid JSON object with schema:
     if (this.canCallLLM()) {
       try {
         const responseJson = await this.callLLM(prompt);
-        const parsed = JSON.parse(cleanJsonOutput(responseJson));
+        const parsed = safeJsonParse(responseJson);
         const validated = GapDiscoverySchema.safeParse(parsed);
         if (validated.success) return validated.data;
       } catch (err: any) {
@@ -249,7 +308,7 @@ Return ONLY a valid JSON object matching:
     if (this.canCallLLM()) {
       try {
         const responseJson = await this.callLLM(prompt);
-        const parsed = JSON.parse(cleanJsonOutput(responseJson));
+        const parsed = safeJsonParse(responseJson);
         const validated = GapFalsificationSchema.safeParse(parsed);
         if (validated.success) return validated.data;
       } catch (err: any) {
@@ -313,7 +372,7 @@ Return ONLY a valid JSON object adhering to this schema:
     if (this.canCallLLM()) {
       try {
         const responseJson = await this.callLLM(prompt);
-        const parsed = JSON.parse(cleanJsonOutput(responseJson));
+        const parsed = safeJsonParse(responseJson);
         const validated = ExperimentPlanSchema.safeParse(parsed);
         if (validated.success) return validated.data;
       } catch (err: any) {
@@ -650,11 +709,12 @@ Return ONLY a valid JSON object adhering to this schema:
   }
 
   private async callLLM(prompt: string): Promise<string> {
-    // 1. Local Ollama Integration (e.g. gpt-oss:120b-cloud)
+    // 1. Local Ollama Integration (e.g. gpt-oss:120b-cloud, gpt-oss:20b-cloud)
     if (this.provider === 'ollama') {
       const url = `${this.ollamaBaseUrl}/api/chat`;
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 120000);
+      // Safe 20s timeout to prevent hanging on queued/slow cloud models
+      const timeout = setTimeout(() => controller.abort(), 20000);
 
       try {
         const res = await fetch(url, {

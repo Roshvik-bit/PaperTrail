@@ -15,30 +15,60 @@ import {
   Dataset,
   PaperLineage,
   RetractionAlert,
-  CrossDomainConnection
+  CrossDomainConnection,
+  ResearchBundle,
+  ResearchImportResult,
+  StorageStatusInfo
 } from '@/types';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { ResearchRepository } from './repository-interface';
+import { ResearchImportService } from '../export/import-service';
+import { SQLiteResearchRepository } from './sqlite-repository';
 
-export class PaperTrailRepository {
+interface MemoryStoreType {
+  sessions: Map<string, ResearchSession>;
+  sessionPapers: Map<string, Set<string>>;
+  papers: Map<string, Paper>;
+  claims: Map<string, Claim>;
+  contexts: Map<string, ExperimentalContext>;
+  relationships: Map<string, EvidenceRelationship>;
+  gaps: Map<string, ResearchGap>;
+  investigations: Map<string, GapInvestigationReport[]>;
+  experiments: Map<string, ProposedExperiment>;
+  jobs: Map<string, ProcessingJob>;
+  evolutionEvents: Map<string, EvidenceEvolutionEvent[]>;
+  datasets: Map<string, Dataset>;
+  paperDatasets: Map<string, Set<string>>;
+  lineages: Map<string, PaperLineage>;
+  retractionAlerts: Map<string, RetractionAlert>;
+  crossDomain: Map<string, CrossDomainConnection[]>;
+}
+
+const globalStore: MemoryStoreType = (globalThis as any).__papertrail_store__ || {
+  sessions: new Map<string, ResearchSession>(),
+  sessionPapers: new Map<string, Set<string>>(),
+  papers: new Map<string, Paper>(),
+  claims: new Map<string, Claim>(),
+  contexts: new Map<string, ExperimentalContext>(),
+  relationships: new Map<string, EvidenceRelationship>(),
+  gaps: new Map<string, ResearchGap>(),
+  investigations: new Map<string, GapInvestigationReport[]>(),
+  experiments: new Map<string, ProposedExperiment>(),
+  jobs: new Map<string, ProcessingJob>(),
+  evolutionEvents: new Map<string, EvidenceEvolutionEvent[]>(),
+  datasets: new Map<string, Dataset>(),
+  paperDatasets: new Map<string, Set<string>>(),
+  lineages: new Map<string, PaperLineage>(),
+  retractionAlerts: new Map<string, RetractionAlert>(),
+  crossDomain: new Map<string, CrossDomainConnection[]>(),
+};
+(globalThis as any).__papertrail_store__ = globalStore;
+
+export class PaperTrailRepository implements ResearchRepository {
   private supabase: SupabaseClient | null = null;
-  private static memoryStore = {
-    sessions: new Map<string, ResearchSession>(),
-    sessionPapers: new Map<string, Set<string>>(),
-    papers: new Map<string, Paper>(),
-    claims: new Map<string, Claim>(),
-    contexts: new Map<string, ExperimentalContext>(),
-    relationships: new Map<string, EvidenceRelationship>(),
-    gaps: new Map<string, ResearchGap>(),
-    investigations: new Map<string, GapInvestigationReport[]>(),
-    experiments: new Map<string, ProposedExperiment>(),
-    jobs: new Map<string, ProcessingJob>(),
-    evolutionEvents: new Map<string, EvidenceEvolutionEvent[]>(),
-    datasets: new Map<string, Dataset>(),
-    paperDatasets: new Map<string, Set<string>>(),
-    lineages: new Map<string, PaperLineage>(),
-    retractionAlerts: new Map<string, RetractionAlert>(),
-    crossDomain: new Map<string, CrossDomainConnection[]>(),
-  };
+  private static get memoryStore(): MemoryStoreType {
+    return (globalThis as any).__papertrail_store__;
+  }
 
   constructor() {
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -53,9 +83,9 @@ export class PaperTrailRepository {
   }
 
   // --- SESSIONS ---
-  async createSession(title: string, researchQuestion: string, domain = 'edge_ai'): Promise<ResearchSession> {
+  async createSession(title: string, researchQuestion: string, domain = 'edge_ai', customId?: string): Promise<ResearchSession> {
     const session: ResearchSession = {
-      id: `sess_${Math.random().toString(36).substring(2, 10)}`,
+      id: customId || `sess_${Math.random().toString(36).substring(2, 10)}`,
       title,
       research_question: researchQuestion,
       domain,
@@ -65,6 +95,9 @@ export class PaperTrailRepository {
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
+
+    PaperTrailRepository.memoryStore.sessions.set(session.id, session);
+    PaperTrailRepository.memoryStore.sessionPapers.set(session.id, new Set());
 
     if (this.supabase) {
       try {
@@ -79,14 +112,15 @@ export class PaperTrailRepository {
           })
           .select()
           .single();
-        if (!error && data) return data as ResearchSession;
+        if (!error && data) {
+          PaperTrailRepository.memoryStore.sessions.set(session.id, data as ResearchSession);
+          return data as ResearchSession;
+        }
       } catch (err) {
         console.warn('[Repository] Supabase insert session fallback:', err);
       }
     }
 
-    PaperTrailRepository.memoryStore.sessions.set(session.id, session);
-    PaperTrailRepository.memoryStore.sessionPapers.set(session.id, new Set());
     return session;
   }
 
@@ -110,6 +144,23 @@ export class PaperTrailRepository {
     return Array.from(PaperTrailRepository.memoryStore.sessions.values()).sort(
       (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     );
+  }
+
+  async updateSession(id: string, updates: Partial<ResearchSession>): Promise<ResearchSession | null> {
+    const existing = await this.getSession(id);
+    if (!existing) return null;
+    const updated: ResearchSession = {
+      ...existing,
+      ...updates,
+      updated_at: new Date().toISOString(),
+    };
+    PaperTrailRepository.memoryStore.sessions.set(id, updated);
+    if (this.supabase) {
+      try {
+        await this.supabase.from('research_sessions').update(updates).eq('id', id);
+      } catch {}
+    }
+    return updated;
   }
 
   // --- PAPERS ---
@@ -262,6 +313,10 @@ export class PaperTrailRepository {
     return gap;
   }
 
+  async updateGap(gap: ResearchGap): Promise<ResearchGap> {
+    return this.saveGap(gap);
+  }
+
   async updateGapStatus(id: string, status: ResearchGap['status']): Promise<void> {
     const gap = PaperTrailRepository.memoryStore.gaps.get(id);
     if (gap) {
@@ -302,6 +357,24 @@ export class PaperTrailRepository {
     return null;
   }
 
+  async getExperimentsForGap(gapId: string): Promise<ProposedExperiment[]> {
+    const list: ProposedExperiment[] = [];
+    for (const exp of PaperTrailRepository.memoryStore.experiments.values()) {
+      if (exp.research_gap_id === gapId) list.push(exp);
+    }
+    return list;
+  }
+
+  async getExperimentsForSession(sessionId: string): Promise<ProposedExperiment[]> {
+    const gaps = await this.getGapsForSession(sessionId);
+    const gapIds = new Set(gaps.map(g => g.id));
+    const list: ProposedExperiment[] = [];
+    for (const exp of PaperTrailRepository.memoryStore.experiments.values()) {
+      if (gapIds.has(exp.research_gap_id)) list.push(exp);
+    }
+    return list;
+  }
+
   async getExperiment(id: string): Promise<ProposedExperiment | null> {
     return PaperTrailRepository.memoryStore.experiments.get(id) || null;
   }
@@ -334,6 +407,10 @@ export class PaperTrailRepository {
   }
 
   // --- EVIDENCE GRAPH GENERATION ---
+  async getGraphData(sessionId: string): Promise<ResearchGraphData> {
+    return this.getGraphForSession(sessionId);
+  }
+
   async getGraphForSession(sessionId: string): Promise<ResearchGraphData> {
     const papers = await this.getPapersForSession(sessionId);
     const claims = await this.getClaimsForSession(sessionId);
@@ -536,4 +613,121 @@ export class PaperTrailRepository {
   async getCrossDomainForSession(sessionId: string): Promise<CrossDomainConnection[]> {
     return PaperTrailRepository.memoryStore.crossDomain.get(sessionId) || [];
   }
+
+  // --- COMPLETE RESEARCH BUNDLE EXPORT ---
+  async getCompleteResearchBundle(sessionId: string): Promise<ResearchBundle | null> {
+    const session = await this.getSession(sessionId);
+    if (!session) return null;
+
+    const papers = await this.getPapersForSession(sessionId);
+    const claims = await this.getClaimsForSession(sessionId);
+    const relationships = await this.getRelationshipsForSession(sessionId);
+    const gaps = await this.getGapsForSession(sessionId);
+    const experiments = await this.getExperimentsForSession(sessionId);
+    const datasets = await this.getDatasetsForSession(sessionId);
+    const lineages = await this.getLineagesForSession(sessionId);
+    const retraction_alerts = await this.getRetractionAlertsForSession(sessionId);
+    const cross_domain = await this.getCrossDomainForSession(sessionId);
+    const evolution_events = await this.getEvolutionEvents(sessionId);
+
+    const investigations: GapInvestigationReport[] = [];
+    for (const g of gaps) {
+      const invs = await this.getInvestigationsForGap(g.id);
+      investigations.push(...invs);
+    }
+
+    const contexts: ExperimentalContext[] = [];
+    for (const p of papers) {
+      const ctx = await this.getContextForPaper(p.id);
+      if (ctx) contexts.push(ctx);
+    }
+
+    return {
+      manifest: {
+        format_version: '1.0.0',
+        app_name: 'PaperTrail',
+        app_version: '1.0.0',
+        exported_at: new Date().toISOString(),
+        session_id: session.id,
+        title: session.title,
+        research_question: session.research_question,
+        domain: session.domain,
+        counts: {
+          papers: papers.length,
+          claims: claims.length,
+          contexts: contexts.length,
+          evidence_relationships: relationships.length,
+          research_gaps: gaps.length,
+          gap_investigations: investigations.length,
+          proposed_experiments: experiments.length,
+          datasets: datasets.length,
+          lineages: lineages.length,
+          retraction_alerts: retraction_alerts.length,
+          cross_domain_connections: cross_domain.length,
+          evolution_events: evolution_events.length,
+        },
+      },
+      session,
+      papers,
+      claims,
+      contexts,
+      relationships,
+      gaps,
+      investigations,
+      experiments,
+      datasets,
+      lineages,
+      retraction_alerts,
+      cross_domain,
+      evolution_events,
+    };
+  }
+
+  // --- IMPORT ---
+  async importResearchBundle(bundle: ResearchBundle, options?: { mode?: 'CREATE_NEW' | 'MERGE' | 'REPLACE'; overwriteConfirmed?: boolean }): Promise<ResearchImportResult> {
+    return ResearchImportService.restoreIntoRepository(this, bundle, options);
+  }
+
+  // --- SEARCH ---
+  async searchLocal(query: string): Promise<{ papers: Paper[]; claims: Claim[] }> {
+    const term = query.toLowerCase().trim();
+    const papers = Array.from(PaperTrailRepository.memoryStore.papers.values()).filter(
+      p => p.title.toLowerCase().includes(term) || (p.abstract || '').toLowerCase().includes(term)
+    );
+    const claims = Array.from(PaperTrailRepository.memoryStore.claims.values()).filter(
+      c => c.claim_text.toLowerCase().includes(term) || (c.supporting_passage || '').toLowerCase().includes(term)
+    );
+    return { papers, claims };
+  }
+
+  // --- STORAGE STATUS ---
+  async getStorageStatus(): Promise<StorageStatusInfo> {
+    const isConnected = !!this.supabase;
+    const sessions = await this.listSessions();
+    const papersCount = PaperTrailRepository.memoryStore.papers.size;
+
+    return {
+      provider: isConnected ? 'supabase' : 'memory',
+      cloud_connected: isConnected,
+      cloud_endpoint: process.env.NEXT_PUBLIC_SUPABASE_URL,
+      local_database_available: true,
+      active_sessions_count: sessions.length,
+      total_papers_count: papersCount,
+      last_sync_at: new Date().toISOString(),
+    };
+  }
 }
+
+// Aliases and factory
+export const SupabaseResearchRepository = PaperTrailRepository;
+export type SupabaseResearchRepository = PaperTrailRepository;
+
+export function getResearchRepository(provider?: 'supabase' | 'sqlite'): ResearchRepository {
+  const chosen = provider || (process.env.STORAGE_PROVIDER as 'supabase' | 'sqlite') || 'supabase';
+  if (chosen === 'sqlite') {
+    return new SQLiteResearchRepository();
+  }
+  return new PaperTrailRepository();
+}
+export { SQLiteResearchRepository };
+export type { ResearchRepository };

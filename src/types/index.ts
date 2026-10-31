@@ -82,6 +82,7 @@ export interface Claim {
   extraction_confidence: number;
   verification_status: ClaimVerificationStatus;
   extraction_version: string;
+  experimental_context?: any;
   created_at: string;
 }
 
@@ -439,3 +440,82 @@ export interface ResearchMonitor {
   metadata?: Record<string, unknown>;
   created_at: string;
 }
+
+// =====================================================================
+// RESEARCH PORTABILITY, EXPORT & STORAGE TYPES
+// =====================================================================
+
+export interface ResearchExportManifest {
+  format_version: '1.0.0';
+  app_name: 'PaperTrail';
+  app_version: string;
+  exported_at: string;
+  session_id: string;
+  title: string;
+  research_question: string;
+  domain: string;
+  counts: {
+    papers: number;
+    claims: number;
+    contexts: number;
+    evidence_relationships: number;
+    research_gaps: number;
+    gap_investigations: number;
+    proposed_experiments: number;
+    datasets: number;
+    lineages: number;
+    retraction_alerts: number;
+    cross_domain_connections: number;
+    evolution_events: number;
+  };
+  checksum?: string;
+}
+
+export interface ResearchBundle {
+  manifest: ResearchExportManifest;
+  session: ResearchSession;
+  papers: Paper[];
+  claims: Claim[];
+  contexts: ExperimentalContext[];
+  relationships: EvidenceRelationship[];
+  gaps: ResearchGap[];
+  investigations: GapInvestigationReport[];
+  experiments: ProposedExperiment[];
+  datasets: Dataset[];
+  lineages: PaperLineage[];
+  retraction_alerts: RetractionAlert[];
+  cross_domain: CrossDomainConnection[];
+  evolution_events: EvidenceEvolutionEvent[];
+}
+
+export type ResearchExportFormat = 'zip' | 'json' | 'csv' | 'markdown' | 'bibtex' | 'html';
+
+export interface ResearchImportResult {
+  success: boolean;
+  session_id: string;
+  action: 'CREATED_NEW' | 'MERGED' | 'REPLACED';
+  title: string;
+  imported_counts: {
+    papers: number;
+    claims: number;
+    contexts: number;
+    relationships: number;
+    gaps: number;
+    experiments: number;
+  };
+  warnings: string[];
+  errors?: string[];
+}
+
+export interface StorageStatusInfo {
+  provider: 'supabase' | 'sqlite' | 'memory';
+  cloud_connected: boolean;
+  cloud_endpoint?: string;
+  local_database_available: boolean;
+  local_database_path?: string;
+  local_database_size_bytes?: number;
+  active_sessions_count: number;
+  total_papers_count: number;
+  last_sync_at?: string;
+}
+
