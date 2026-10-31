@@ -10,7 +10,12 @@ import {
   ResearchSession,
   ResearchGraphData,
   JobType,
-  JobStatus
+  JobStatus,
+  EvidenceEvolutionEvent,
+  Dataset,
+  PaperLineage,
+  RetractionAlert,
+  CrossDomainConnection
 } from '@/types';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
@@ -27,6 +32,12 @@ export class PaperTrailRepository {
     investigations: new Map<string, GapInvestigationReport[]>(),
     experiments: new Map<string, ProposedExperiment>(),
     jobs: new Map<string, ProcessingJob>(),
+    evolutionEvents: new Map<string, EvidenceEvolutionEvent[]>(),
+    datasets: new Map<string, Dataset>(),
+    paperDatasets: new Map<string, Set<string>>(),
+    lineages: new Map<string, PaperLineage>(),
+    retractionAlerts: new Map<string, RetractionAlert>(),
+    crossDomain: new Map<string, CrossDomainConnection[]>(),
   };
 
   constructor() {
@@ -397,6 +408,132 @@ export class PaperTrailRepository {
       }
     }
 
+    // Dataset nodes & connections
+    const datasets = await this.getDatasetsForSession(sessionId);
+    for (const d of datasets) {
+      nodes.push({
+        id: d.id,
+        type: 'dataset',
+        label: `DATASET: ${d.title.slice(0, 30)}`,
+        sublabel: `${d.source_repository} (${d.license})`,
+        data: { dataset: d },
+      });
+
+      if (d.associated_paper_ids) {
+        for (const pid of d.associated_paper_ids) {
+          edges.push({
+            id: `e_ds_${d.id}_${pid}`,
+            source: pid,
+            target: d.id,
+            type: 'EVALUATES_ON',
+            label: 'evaluates_on',
+          });
+        }
+      }
+    }
+
+    // Preprint-to-publication lineage edges
+    const lineages = await this.getLineagesForSession(sessionId);
+    for (const l of lineages) {
+      edges.push({
+        id: l.id,
+        source: l.preprint_paper_id,
+        target: l.published_paper_id,
+        type: 'PREPRINT_OF',
+        label: 'published_as',
+        confidence: l.confidence,
+      });
+    }
+
     return { nodes, edges };
+  }
+
+  // --- EVOLUTION EVENTS ---
+  async saveEvolutionEvent(event: EvidenceEvolutionEvent): Promise<void> {
+    const list = PaperTrailRepository.memoryStore.evolutionEvents.get(event.session_id) || [];
+    list.unshift(event);
+    PaperTrailRepository.memoryStore.evolutionEvents.set(event.session_id, list);
+  }
+
+  async getEvolutionEvents(sessionId: string): Promise<EvidenceEvolutionEvent[]> {
+    return PaperTrailRepository.memoryStore.evolutionEvents.get(sessionId) || [];
+  }
+
+  // --- DATASETS ---
+  async saveDataset(dataset: Dataset, paperId?: string): Promise<Dataset> {
+    PaperTrailRepository.memoryStore.datasets.set(dataset.id, dataset);
+    if (paperId) {
+      const set = PaperTrailRepository.memoryStore.paperDatasets.get(paperId) || new Set();
+      set.add(dataset.id);
+      PaperTrailRepository.memoryStore.paperDatasets.set(paperId, set);
+    }
+    return dataset;
+  }
+
+  async getDatasetsForSession(sessionId: string): Promise<Dataset[]> {
+    const papers = await this.getPapersForSession(sessionId);
+    const result: Dataset[] = [];
+    const addedIds = new Set<string>();
+
+    for (const p of papers) {
+      const dsIds = PaperTrailRepository.memoryStore.paperDatasets.get(p.id) || new Set();
+      for (const dsId of Array.from(dsIds)) {
+        if (!addedIds.has(dsId)) {
+          const ds = PaperTrailRepository.memoryStore.datasets.get(dsId);
+          if (ds) {
+            result.push(ds);
+            addedIds.add(dsId);
+          }
+        }
+      }
+    }
+
+    // Also return all datasets in global store if session has few
+    if (result.length === 0) {
+      return Array.from(PaperTrailRepository.memoryStore.datasets.values()).slice(0, 5);
+    }
+
+    return result;
+  }
+
+  async listDatasets(): Promise<Dataset[]> {
+    return Array.from(PaperTrailRepository.memoryStore.datasets.values());
+  }
+
+  // --- LINEAGES ---
+  async saveLineage(lineage: PaperLineage): Promise<void> {
+    PaperTrailRepository.memoryStore.lineages.set(lineage.id, lineage);
+  }
+
+  async getLineagesForSession(sessionId: string): Promise<PaperLineage[]> {
+    const papers = await this.getPapersForSession(sessionId);
+    const paperIds = new Set(papers.map(p => p.id));
+    return Array.from(PaperTrailRepository.memoryStore.lineages.values()).filter(
+      l => paperIds.has(l.preprint_paper_id) || paperIds.has(l.published_paper_id)
+    );
+  }
+
+  // --- RETRACTIONS ---
+  async saveRetractionAlert(alert: RetractionAlert): Promise<void> {
+    PaperTrailRepository.memoryStore.retractionAlerts.set(alert.id, alert);
+  }
+
+  async getRetractionAlertsForSession(sessionId: string): Promise<RetractionAlert[]> {
+    const papers = await this.getPapersForSession(sessionId);
+    const paperIds = new Set(papers.map(p => p.id));
+    return Array.from(PaperTrailRepository.memoryStore.retractionAlerts.values()).filter(
+      a => paperIds.has(a.paper_id)
+    );
+  }
+
+  // --- CROSS DOMAIN ---
+  async saveCrossDomain(connection: CrossDomainConnection): Promise<void> {
+    const list = PaperTrailRepository.memoryStore.crossDomain.get(connection.session_id || 'default') || [];
+    list.push(connection);
+    PaperTrailRepository.memoryStore.crossDomain.set(connection.session_id || 'default', list);
+  }
+
+  async getCrossDomainForSession(sessionId: string): Promise<CrossDomainConnection[]> {
+    return PaperTrailRepository.memoryStore.crossDomain.get(sessionId) || [];
   }
 }

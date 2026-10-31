@@ -108,3 +108,4 @@ Practical, resource-evaluated experiment protocols:
 - `metrics`: JSONB
 - `estimated_resources`: JSONB (`compute_hours`, `estimated_cost_usd`, `estimation_confidence`)
 - `checklist`: JSONB
+

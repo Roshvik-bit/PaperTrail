@@ -276,3 +276,274 @@ describe('Experiment Feasibility Planning Engine', async () => {
     assert.ok(plan.checklist.length > 0);
   });
 });
+
+// Test 9: Preprint-to-Publication Lineage Matching
+describe('Preprint Lineage Intelligence', async () => {
+  const { PreprintLineageService } = await import('../src/lib/scholarly/preprint-lineage.ts');
+  const service = new PreprintLineageService();
+
+  test('correctly matches arXiv preprint to eventual conference publication with high confidence', () => {
+    const preprint = {
+      id: 'paper_awq_arxiv',
+      title: 'AWQ: Activation-aware Weight Quantization for LLM Compression and Acceleration',
+      abstract: 'We propose AWQ for on-device LLM acceleration.',
+      authors: [{ name: 'Ji Lin' }, { name: 'Jiaming Tang' }, { name: 'Song Han' }],
+      venue: 'arXiv Preprint',
+      year: 2023,
+      arxiv_id: '2306.00978',
+      open_access_status: 'gold',
+      full_text_status: 'open_access_pdf',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    const published = {
+      id: 'paper_awq_mlsys',
+      title: 'AWQ: Activation-aware Weight Quantization for On-Device LLM Compression and Acceleration',
+      abstract: 'We propose AWQ for on-device LLM acceleration with MLSys benchmarks.',
+      authors: [{ name: 'Ji Lin' }, { name: 'Jiaming Tang' }, { name: 'Song Han' }],
+      venue: 'MLSys: Conference on Machine Learning and Systems',
+      year: 2024,
+      doi: '10.48550/arXiv.2306.00978',
+      open_access_status: 'gold',
+      full_text_status: 'open_access_pdf',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    const match = service.matchPreprintToPublication(preprint, published);
+    assert.ok(match, 'Preprint and publication must match');
+    assert.ok(match.confidence >= 0.85, 'Confidence must be at least 0.85');
+    assert.ok(match.match_evidence.title_similarity > 0.80);
+    assert.ok(match.match_evidence.author_overlap >= 0.90);
+    assert.equal(match.preprint_venue, 'arXiv Preprint');
+    assert.equal(match.published_venue, 'MLSys: Conference on Machine Learning and Systems');
+  });
+
+  test('rejects unrelated papers with low title/author overlap', () => {
+    const paperA = {
+      id: 'pA',
+      title: 'Quantum Computing Fault Tolerance Bounds',
+      abstract: 'Fault tolerant thresholds.',
+      authors: [{ name: 'Alice Smith' }],
+      venue: 'arXiv',
+      open_access_status: 'gold',
+      full_text_status: 'abstract_only',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    const paperB = {
+      id: 'pB',
+      title: 'AWQ: Activation-aware Weight Quantization',
+      abstract: 'Quantization for LLMs.',
+      authors: [{ name: 'Ji Lin' }],
+      venue: 'MLSys',
+      open_access_status: 'gold',
+      full_text_status: 'abstract_only',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    const match = service.matchPreprintToPublication(paperA, paperB);
+    assert.equal(match, null, 'Unrelated papers must not match');
+  });
+});
+
+// Test 10: Retraction & Correction Intelligence
+describe('Retraction Intelligence & Impact Propagation', async () => {
+  const { RetractionIntelligenceService } = await import('../src/lib/scholarly/retraction-intelligence.ts');
+  const service = new RetractionIntelligenceService();
+
+  test('detects retraction flags and generates provenance alerts without deleting evidence', () => {
+    const retractedPaper = {
+      id: 'paper_flawed_1',
+      title: 'Fabricated Superconductor Token Acceleration Rates',
+      abstract: 'This paper has been retracted by the publisher.',
+      is_retracted: true,
+      authors: [{ name: 'Author X' }],
+      open_access_status: 'gold',
+      full_text_status: 'abstract_only',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    const claims = [
+      {
+        id: 'c_flawed_1',
+        paper_id: 'paper_flawed_1',
+        claim_text: 'Achieved 10,000 tokens/sec on 0.5W budget.',
+        claim_type: 'FINDING',
+        supporting_passage: 'Superconducting chip operates at 10,000 tps.',
+        extraction_confidence: 0.9,
+        verification_status: 'AUTOMATICALLY_EXTRACTED',
+        extraction_version: 'v1',
+        created_at: new Date().toISOString(),
+      }
+    ];
+
+    const relationships = [
+      {
+        id: 'rel_flawed',
+        source_claim_id: 'c_flawed_1',
+        target_claim_id: 'c_valid_1',
+        relationship_type: 'CONTRADICTS',
+        supporting_evidence: 'Direct contradiction in reported latency.',
+        confidence: 0.9,
+        verification_status: 'AUTOMATIC',
+        created_at: new Date().toISOString(),
+      }
+    ];
+
+    const gaps = [
+      {
+        id: 'gap_dependent',
+        title: 'Superconductor Edge AI Limits',
+        research_question: 'Can superconductors run LLMs?',
+        description: 'Testing superconducting inference.',
+        gap_type: 'UNINVESTIGATED_HARDWARE_ENV',
+        supporting_papers: [{ paper_id: 'paper_flawed_1', title: 'Fabricated' }],
+        counter_evidence: [],
+        coverage_summary: '',
+        confidence: 0.8,
+        status: 'CANDIDATE',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }
+    ];
+
+    const impact = service.propagateRetractionImpact(retractedPaper, claims, relationships, gaps);
+
+    assert.equal(impact.alert.status_type, 'RETRACTED');
+    assert.equal(impact.affectedClaims.length, 1);
+    assert.equal(impact.affectedRelationships.length, 1);
+    assert.equal(impact.affectedGaps.length, 1);
+    assert.ok(impact.alert.provenance_warning.includes('PROVENANCE ALERT'));
+  });
+});
+
+// Test 11: Cross-Domain Candidate Discovery
+describe('Cross-Domain Intelligence Engine', async () => {
+  const { CrossDomainService } = await import('../src/lib/scholarly/cross-domain.ts');
+  const { CURATED_EDGE_AI_PAPERS } = await import('../src/lib/scholarly/curated-edge-ai.ts');
+  const service = new CrossDomainService();
+
+  test('surfaces valid candidate cross-domain transfers with explicit terminology mappings', () => {
+    const connections = service.discoverCrossDomainConnections(CURATED_EDGE_AI_PAPERS);
+    assert.ok(connections.length > 0, 'Must discover cross-domain candidate connections');
+
+    for (const conn of connections) {
+      assert.equal(conn.status, 'CANDIDATE_HYPOTHESIS');
+      assert.ok(conn.shared_phenomenon.length > 10);
+      assert.ok(conn.hypothesis_statement.includes('Candidate Hypothesis:'));
+      assert.ok(conn.differing_terminology.length > 0);
+      for (const term of conn.differing_terminology) {
+        assert.ok(term.source_term);
+        assert.ok(term.target_term);
+        assert.ok(term.context);
+      }
+    }
+  });
+});
+
+// Test 12: Continuous Research Evolution Engine (Vertical Slice)
+describe('Continuous Research Evolution Engine', async () => {
+  const { EvolutionService } = await import('../src/lib/analysis/evolution-service.ts');
+  const { PaperTrailRepository } = await import('../src/lib/db/repository.ts');
+  const repo = new PaperTrailRepository();
+  const evolution = new EvolutionService();
+
+  test('ingests new research, extracts claims, detects conflicts, updates gaps and records evolution timeline', async () => {
+    const session = await repo.createSession(
+      'Evolution Test Session',
+      'How does thermal throttling affect on-device inference?'
+    );
+
+    // Initial paper
+    const initialPaper = {
+      id: 'paper_burst_speed',
+      title: 'Ultra-Fast Burst Quantization on Mobile Silicon',
+      abstract: '4-bit quantization achieves 3x speedup on mobile GPU execution in 20-second bursts.',
+      authors: [{ name: 'Researcher A' }],
+      year: 2024,
+      open_access_status: 'gold',
+      full_text_status: 'open_access_pdf',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    await repo.savePaper(initialPaper, session.id);
+
+    // Save initial claim
+    const initialClaim = {
+      id: 'claim_initial_burst',
+      paper_id: 'paper_burst_speed',
+      claim_text: '4-bit quantization achieves 3x speedup on mobile GPU execution in 20-second bursts.',
+      claim_type: 'FINDING',
+      supporting_passage: '3x speedup on mobile GPU execution in 20-second bursts.',
+      extraction_confidence: 0.92,
+      verification_status: 'AUTOMATICALLY_EXTRACTED',
+      extraction_version: 'v1.0.0',
+      created_at: new Date().toISOString(),
+    };
+    await repo.saveClaims([initialClaim]);
+
+    // Initial candidate gap
+    const initialGap = {
+      id: 'gap_evo_test',
+      session_id: session.id,
+      title: 'Thermal Resilience in Mobile Quantization',
+      research_question: 'Does quantization resist thermal throttling during extended workloads?',
+      description: 'Prior work only tested 20-second bursts.',
+      gap_type: 'UNEXPLORED_EXPERIMENTAL_COMBINATION',
+      supporting_papers: [{ paper_id: 'paper_burst_speed', title: 'Ultra-Fast Burst' }],
+      counter_evidence: [],
+      coverage_summary: '',
+      confidence: 0.85,
+      status: 'CANDIDATE',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    await repo.saveGap(initialGap);
+
+    // Seed newly discovered publication representing evidence shift
+    const newlyDiscoveredPaper = {
+      id: 'paper_thermal_shift',
+      title: 'Thermal Throttling Dynamics and Sustained Throughput Collapse on Mobile SoCs',
+      abstract: 'Under continuous 5-minute workloads, 4-bit generation throughput collapses by 43-61% due to DVFS downclocking.',
+      authors: [{ name: 'Hao Chen' }],
+      year: 2024,
+      open_access_status: 'gold',
+      full_text_status: 'open_access_pdf',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    // Run Evolution Check
+    const result = await evolution.checkSessionEvolution(session.id, newlyDiscoveredPaper);
+
+    assert.equal(result.session_id, session.id);
+    assert.ok(result.new_claims_extracted_count > 0, 'Must extract claims from new paper');
+    assert.ok(result.evolution_event, 'Must record evolution timeline event');
+    assert.equal(result.evolution_event.event_type, 'NEW_PUBLICATION_INGESTED');
+    assert.ok(result.evolution_event.description.includes('New research ingested:'));
+
+    // Check timeline events stored in repository
+    const timelineEvents = await repo.getEvolutionEvents(session.id);
+    assert.ok(timelineEvents.length >= 1, 'Timeline events must be retrievable');
+  });
+});
+
+// Test 13: Monitoring Resilience & Offline Fallbacks
+describe('TinyMonitor & Scholarly Polling Resilience', async () => {
+  const { TinyFishProvider } = await import('../src/lib/scholarly/tinyfish.ts');
+  const provider = new TinyFishProvider();
+
+  test('handles unconfigured state gracefully with simulated monitor checks and zero crashes', async () => {
+    const monitorRes = await provider.checkMonitor('Small Language Models Edge Throttling');
+    assert.equal(monitorRes.status, 'ACTIVE');
+    assert.ok(monitorRes.monitor_id.startsWith('tm_'));
+    assert.ok(monitorRes.provenance_note);
+  });
+});
+
+

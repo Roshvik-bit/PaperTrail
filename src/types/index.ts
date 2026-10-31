@@ -29,6 +29,8 @@ export interface Paper {
   full_text_status: FullTextStatus;
   raw_full_text?: string;
   citation_count?: number;
+  is_retracted?: boolean;
+  retraction_notice?: string;
   metadata?: Record<string, unknown>;
   created_at: string;
   updated_at: string;
@@ -302,7 +304,7 @@ export interface ResearchSession {
 export interface ResearchGraphData {
   nodes: {
     id: string;
-    type: 'paper' | 'claim' | 'gap' | 'experiment';
+    type: 'paper' | 'claim' | 'gap' | 'experiment' | 'dataset' | 'cross_domain';
     label: string;
     sublabel?: string;
     data: Record<string, unknown>;
@@ -316,4 +318,124 @@ export interface ResearchGraphData {
     confidence?: number;
     supporting_evidence?: string;
   }[];
+}
+
+// =====================================================================
+// PREPRINT LINEAGE, RETRACTION, DATASET & EVOLUTION INTELLIGENCE
+// =====================================================================
+
+export interface PaperLineage {
+  id: string;
+  preprint_paper_id: string;
+  published_paper_id: string;
+  preprint_title?: string;
+  published_title?: string;
+  preprint_venue?: string;
+  published_venue?: string;
+  confidence: number;
+  match_evidence: {
+    title_similarity: number;
+    author_overlap: number;
+    doi_match?: boolean;
+    arxiv_match?: boolean;
+  };
+  methodology_diff?: string;
+  findings_diff?: string;
+  created_at: string;
+}
+
+export type RetractionType = 'RETRACTED' | 'CORRECTED' | 'EXPRESSION_OF_CONCERN';
+
+export interface RetractionAlert {
+  id: string;
+  paper_id: string;
+  paper_title: string;
+  status_type: RetractionType;
+  notice_url?: string;
+  notice_date?: string;
+  reason: string;
+  affected_claim_ids: string[];
+  affected_gap_ids: string[];
+  provenance_warning: string;
+  created_at: string;
+}
+
+export interface Dataset {
+  id: string;
+  title: string;
+  description: string;
+  creator?: string;
+  license: string;
+  version?: string;
+  access_url: string;
+  source_repository: 'huggingface' | 'zenodo' | 'figshare' | 'github' | 'paperswithcode' | 'other';
+  availability: 'PUBLIC' | 'RESTRICTED' | 'PROPRIETARY';
+  associated_paper_ids?: string[];
+  modalities?: string[];
+  metadata?: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface CrossDomainConnection {
+  id: string;
+  session_id?: string;
+  source_domain: string;
+  target_domain: string;
+  shared_phenomenon: string;
+  hypothesis_statement: string;
+  differing_terminology: { source_term: string; target_term: string; context: string }[];
+  source_paper_ids: string[];
+  target_paper_ids: string[];
+  confidence: number;
+  status: 'CANDIDATE_HYPOTHESIS' | 'VALIDATED_TRANSFER' | 'REFUTED';
+  created_at: string;
+}
+
+export interface NullResultFinding {
+  id: string;
+  positive_claim: Claim;
+  null_claim: Claim;
+  sample_size_difference?: string;
+  measurement_difference?: string;
+  context_divergence: string;
+  confidence: number;
+  created_at: string;
+}
+
+export type EvolutionEventType =
+  | 'NEW_PUBLICATION_INGESTED'
+  | 'CLAIM_CONFLICT_DETECTED'
+  | 'GAP_REASSESSED'
+  | 'RETRACTION_REGISTERED'
+  | 'PREPRINT_PUBLISHED'
+  | 'CROSS_DOMAIN_DISCOVERED'
+  | 'NULL_RESULT_RECORDED';
+
+export interface EvidenceEvolutionEvent {
+  id: string;
+  session_id: string;
+  event_type: EvolutionEventType;
+  title: string;
+  description: string;
+  paper_id?: string;
+  impact_summary: {
+    new_claims_count?: number;
+    affected_claims?: string[];
+    gap_updates?: string[];
+    evolution_delta?: string;
+  };
+  created_at: string;
+}
+
+export interface ResearchMonitor {
+  id: string;
+  session_id: string;
+  query_topic: string;
+  monitor_provider: 'tinyfish_monitor' | 'scholarly_poller';
+  status: 'ACTIVE' | 'PAUSED' | 'FAILED';
+  last_checked_at: string;
+  next_check_due?: string;
+  new_findings_count: number;
+  metadata?: Record<string, unknown>;
+  created_at: string;
 }

@@ -188,3 +188,4 @@ export class ResearchDiscoveryService {
     return `title:${paper.title.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
   }
 }
+

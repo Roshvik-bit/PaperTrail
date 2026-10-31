@@ -88,3 +88,4 @@
 - **`POST /api/research/gaps/:id/plan-experiment`**
   - **Description**: Generates a testable hypothesis, variables breakdown, and hardware feasibility estimate.
   - **Response**: `{ "experiment": ProposedExperiment }`
+

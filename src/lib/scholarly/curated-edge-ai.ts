@@ -173,3 +173,4 @@ export const CURATED_EDGE_AI_PAPERS: Paper[] = [
     updated_at: '2024-05-10T00:00:00Z'
   }
 ];
+

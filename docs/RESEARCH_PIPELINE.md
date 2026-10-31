@@ -77,3 +77,4 @@ Generates concrete protocols with:
 - Independent, Dependent, and Controlled variables
 - Hardware feasibility checks (RAM, VRAM, and thermal throttling)
 - Pre-flight checklist and JSON export
+

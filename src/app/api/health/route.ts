@@ -21,3 +21,4 @@ export async function GET() {
     differentiator: 'Context-Aware Scientific Evidence Investigation + Research-Gap Falsification + Experiment Feasibility'
   });
 }
+

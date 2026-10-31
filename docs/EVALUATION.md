@@ -25,3 +25,4 @@ The initial evaluation benchmark includes:
   - *Expected Classification*: `QUALIFIES` (Apparent Contradiction driven by workload duration and thermal state).
 - **Case 2 (Gap Falsification)**: A candidate gap proposing "Does quantization degrade mobile LLM throughput?" is presented.
   - *Expected Outcome*: `EXISTING_WORK_FOUND` or `NARROWED_CANDIDATE` citing Chen et al. (IEEE 2024) and Lin et al. (MLSys 2024).
+

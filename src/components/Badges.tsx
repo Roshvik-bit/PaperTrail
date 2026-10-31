@@ -76,3 +76,4 @@ export function OpenAccessBadge({ status }: { status: OpenAccessStatus }) {
     </span>
   );
 }
+

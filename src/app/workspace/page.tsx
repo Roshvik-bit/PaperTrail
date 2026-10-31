@@ -5,6 +5,11 @@ import { Navigation } from '@/components/Navigation';
 import { EvidenceGraphView } from '@/components/EvidenceGraphView';
 import { DisagreementView } from '@/components/DisagreementView';
 import { GapExplorerView } from '@/components/GapExplorerView';
+import { TimelineEvolutionView } from '@/components/TimelineEvolutionView';
+import { RetractionAlertsView } from '@/components/RetractionAlertsView';
+import { PreprintLineageView } from '@/components/PreprintLineageView';
+import { DatasetExplorerView } from '@/components/DatasetExplorerView';
+import { CrossDomainView } from '@/components/CrossDomainView';
 import { ClaimTypeBadge, OpenAccessBadge } from '@/components/Badges';
 import {
   Paper,
@@ -15,6 +20,11 @@ import {
   ResearchSession,
   GapInvestigationReport,
   ProposedExperiment,
+  EvidenceEvolutionEvent,
+  PaperLineage,
+  RetractionAlert,
+  Dataset,
+  CrossDomainConnection,
 } from '@/types';
 import {
   Search,
@@ -24,13 +34,15 @@ import {
   ArrowRightLeft,
   Loader2,
   ExternalLink,
-  PlusCircle,
   Play,
   Cpu,
   Layers,
-  CheckCircle,
-  HelpCircle,
-  Download,
+  Clock,
+  ShieldAlert,
+  GitCompare,
+  Database,
+  Shuffle,
+  RefreshCw,
 } from 'lucide-react';
 
 const PRESET_QUERIES = [
@@ -45,7 +57,10 @@ export default function WorkspacePage() {
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
-  const [activeTab, setActiveTab] = useState<'discovery' | 'graph' | 'claims' | 'disagreements' | 'gaps'>('discovery');
+  const [evolving, setEvolving] = useState(false);
+  const [activeTab, setActiveTab] = useState<
+    'discovery' | 'graph' | 'claims' | 'disagreements' | 'gaps' | 'timeline' | 'lineages' | 'retractions' | 'datasets' | 'cross-domain'
+  >('discovery');
 
   // Session state data
   const [papers, setPapers] = useState<Paper[]>([]);
@@ -54,6 +69,11 @@ export default function WorkspacePage() {
   const [gaps, setGaps] = useState<ResearchGap[]>([]);
   const [graphData, setGraphData] = useState<ResearchGraphData>({ nodes: [], edges: [] });
   const [sourcesUsed, setSourcesUsed] = useState<string[]>([]);
+  const [evolutionEvents, setEvolutionEvents] = useState<EvidenceEvolutionEvent[]>([]);
+  const [lineages, setLineages] = useState<PaperLineage[]>([]);
+  const [retractionAlerts, setRetractionAlerts] = useState<RetractionAlert[]>([]);
+  const [datasets, setDatasets] = useState<Dataset[]>([]);
+  const [crossDomains, setCrossDomains] = useState<CrossDomainConnection[]>([]);
 
   // Initialize or load session
   useEffect(() => {
@@ -67,7 +87,6 @@ export default function WorkspacePage() {
       if (data.sessions && data.sessions.length > 0) {
         selectSession(data.sessions[0].id);
       } else {
-        // Create initial session with landmark Edge AI question
         createNewSession(PRESET_QUERIES[0]);
       }
     } catch {
@@ -91,7 +110,6 @@ export default function WorkspacePage() {
       if (data.session) {
         setActiveSession(data.session);
         setQuery(question);
-        // Automatically discover papers for this question
         await runDiscovery(data.session.id, question);
       }
     } catch (err: any) {
@@ -117,12 +135,28 @@ export default function WorkspacePage() {
   };
 
   const refreshSessionData = async (sessionId: string) => {
-    const [papersRes, claimsRes, disRes, gapsRes, graphRes] = await Promise.all([
-      fetch(`/api/research/sessions/${sessionId}/papers`).then(r => r.json()),
-      fetch(`/api/research/sessions/${sessionId}/claims`).then(r => r.json()),
-      fetch(`/api/research/sessions/${sessionId}/disagreements`).then(r => r.json()),
-      fetch(`/api/research/sessions/${sessionId}/gaps`).then(r => r.json()),
-      fetch(`/api/research/sessions/${sessionId}/graph`).then(r => r.json()),
+    const [
+      papersRes,
+      claimsRes,
+      disRes,
+      gapsRes,
+      graphRes,
+      timelineRes,
+      lineagesRes,
+      retractionsRes,
+      datasetsRes,
+      crossRes,
+    ] = await Promise.all([
+      fetch(`/api/research/sessions/${sessionId}/papers`).then(r => r.json()).catch(() => ({})),
+      fetch(`/api/research/sessions/${sessionId}/claims`).then(r => r.json()).catch(() => ({})),
+      fetch(`/api/research/sessions/${sessionId}/disagreements`).then(r => r.json()).catch(() => ({})),
+      fetch(`/api/research/sessions/${sessionId}/gaps`).then(r => r.json()).catch(() => ({})),
+      fetch(`/api/research/sessions/${sessionId}/graph`).then(r => r.json()).catch(() => ({})),
+      fetch(`/api/research/sessions/${sessionId}/timeline`).then(r => r.json()).catch(() => ({})),
+      fetch(`/api/research/sessions/${sessionId}/lineages`).then(r => r.json()).catch(() => ({})),
+      fetch(`/api/research/sessions/${sessionId}/retractions`).then(r => r.json()).catch(() => ({})),
+      fetch(`/api/research/sessions/${sessionId}/datasets`).then(r => r.json()).catch(() => ({})),
+      fetch(`/api/research/sessions/${sessionId}/cross-domain`).then(r => r.json()).catch(() => ({})),
     ]);
 
     setPapers(papersRes.papers || []);
@@ -130,6 +164,11 @@ export default function WorkspacePage() {
     setDisagreements(disRes.disagreements || []);
     setGaps(gapsRes.gaps || []);
     setGraphData(graphRes.graph || { nodes: [], edges: [] });
+    setEvolutionEvents(timelineRes.events || []);
+    setLineages(lineagesRes.lineages || []);
+    setRetractionAlerts(retractionsRes.alerts || []);
+    setDatasets(datasetsRes.datasets || []);
+    setCrossDomains(crossRes.connections || []);
   };
 
   const runDiscovery = async (sessionId: string, targetQuery?: string) => {
@@ -145,7 +184,6 @@ export default function WorkspacePage() {
       if (data.papers) {
         setPapers(data.papers);
         setSourcesUsed(data.sources_used || []);
-        // Automatically run analysis if claims are not yet extracted
         await runAnalysis(sessionId);
       }
     } catch (err: any) {
@@ -169,6 +207,25 @@ export default function WorkspacePage() {
       alert(`Analysis error: ${err.message}`);
     } finally {
       setAnalyzing(false);
+    }
+  };
+
+  const handleCheckEvolution = async () => {
+    if (!activeSession) return;
+    setEvolving(true);
+    try {
+      const res = await fetch(`/api/research/sessions/${activeSession.id}/evolution/check`, {
+        method: 'POST',
+      });
+      const data = await res.json();
+      if (data.success) {
+        await refreshSessionData(activeSession.id);
+        setActiveTab('timeline');
+      }
+    } catch (err: any) {
+      alert(`Evolution check error: ${err.message}`);
+    } finally {
+      setEvolving(false);
     }
   };
 
@@ -201,7 +258,7 @@ export default function WorkspacePage() {
                 type="text"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Enter research question, DOI, or arXiv identifier (e.g. 2402.14905)..."
+                placeholder="Enter research topic, hypothesis, DOI, or arXiv identifier (e.g. 2402.14905)..."
                 className="w-full pl-11 pr-4 py-2.5 rounded-lg bg-surface-elevated border border-border text-content-primary placeholder:text-content-muted focus:outline-none focus:border-accent text-sm transition-all"
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && activeSession) {
@@ -220,7 +277,7 @@ export default function WorkspacePage() {
                 className="inline-flex items-center space-x-2 px-4 py-2.5 rounded-lg text-sm font-semibold bg-accent text-background hover:bg-accent-hover disabled:opacity-50 transition-all shadow-sm"
               >
                 {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
-                <span>Discover Literature</span>
+                <span>Discover</span>
               </button>
 
               <button
@@ -231,7 +288,16 @@ export default function WorkspacePage() {
                 className="inline-flex items-center space-x-2 px-4 py-2.5 rounded-lg text-sm font-semibold bg-surface-elevated border border-border hover:border-secondary text-content-primary disabled:opacity-50 transition-all"
               >
                 {analyzing ? <Loader2 className="w-4 h-4 animate-spin text-secondary" /> : <Play className="w-4 h-4 text-secondary" />}
-                <span>Extract & Link Evidence</span>
+                <span>Extract & Link</span>
+              </button>
+
+              <button
+                onClick={handleCheckEvolution}
+                disabled={evolving || loading}
+                className="inline-flex items-center space-x-2 px-4 py-2.5 rounded-lg text-sm font-semibold bg-purple-950/40 border border-purple-500/40 text-purple-300 hover:bg-purple-900/50 disabled:opacity-50 transition-all"
+              >
+                <RefreshCw className={`w-4 h-4 ${evolving ? 'animate-spin' : ''}`} />
+                <span>Check Evolution</span>
               </button>
             </div>
           </div>
@@ -256,15 +322,17 @@ export default function WorkspacePage() {
 
         {/* Provenance and Status Bar */}
         <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 rounded-lg bg-surface/70 border border-border text-xs">
-          <div className="flex items-center space-x-4">
-            <span className="font-mono text-content-muted">Corpus Status:</span>
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="font-mono text-content-muted">Corpus:</span>
             <span className="font-semibold text-content-primary">{papers.length} Papers</span>
             <span className="text-content-muted">•</span>
-            <span className="font-semibold text-accent">{claims.length} Extracted Claims</span>
+            <span className="font-semibold text-accent">{claims.length} Claims</span>
             <span className="text-content-muted">•</span>
             <span className="font-semibold text-amber-400">{disagreements.length} Disagreements</span>
             <span className="text-content-muted">•</span>
-            <span className="font-semibold text-purple-400">{gaps.length} Candidate Gaps</span>
+            <span className="font-semibold text-purple-400">{gaps.length} Gaps</span>
+            <span className="text-content-muted">•</span>
+            <span className="font-semibold text-sky-400">{evolutionEvents.length} Evolution Events</span>
           </div>
 
           {sourcesUsed.length > 0 && (
@@ -276,65 +344,125 @@ export default function WorkspacePage() {
         </div>
 
         {/* Tab Navigation */}
-        <div className="flex items-center space-x-2 border-b border-border pb-1">
+        <div className="flex items-center space-x-1.5 border-b border-border pb-1 overflow-x-auto">
           <button
             onClick={() => setActiveTab('discovery')}
-            className={`flex items-center space-x-2 px-4 py-2 rounded-t-lg text-sm font-semibold border-b-2 transition-all ${
+            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-t-lg text-xs font-semibold border-b-2 whitespace-nowrap transition-all ${
               activeTab === 'discovery'
                 ? 'border-accent text-accent bg-surface'
                 : 'border-transparent text-content-secondary hover:text-content-primary'
             }`}
           >
-            <FileText className="w-4 h-4" />
-            <span>1. Scholarly Discovery ({papers.length})</span>
+            <FileText className="w-3.5 h-3.5" />
+            <span>Discovery ({papers.length})</span>
           </button>
 
           <button
             onClick={() => setActiveTab('graph')}
-            className={`flex items-center space-x-2 px-4 py-2 rounded-t-lg text-sm font-semibold border-b-2 transition-all ${
+            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-t-lg text-xs font-semibold border-b-2 whitespace-nowrap transition-all ${
               activeTab === 'graph'
                 ? 'border-accent text-accent bg-surface'
                 : 'border-transparent text-content-secondary hover:text-content-primary'
             }`}
           >
-            <Network className="w-4 h-4" />
-            <span>2. Evidence Graph ({graphData.nodes.length} nodes)</span>
+            <Network className="w-3.5 h-3.5" />
+            <span>Evidence Graph ({graphData.nodes.length})</span>
           </button>
 
           <button
             onClick={() => setActiveTab('claims')}
-            className={`flex items-center space-x-2 px-4 py-2 rounded-t-lg text-sm font-semibold border-b-2 transition-all ${
+            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-t-lg text-xs font-semibold border-b-2 whitespace-nowrap transition-all ${
               activeTab === 'claims'
                 ? 'border-accent text-accent bg-surface'
                 : 'border-transparent text-content-secondary hover:text-content-primary'
             }`}
           >
-            <Layers className="w-4 h-4" />
-            <span>3. Grounded Claims ({claims.length})</span>
+            <Layers className="w-3.5 h-3.5" />
+            <span>Claims ({claims.length})</span>
           </button>
 
           <button
             onClick={() => setActiveTab('disagreements')}
-            className={`flex items-center space-x-2 px-4 py-2 rounded-t-lg text-sm font-semibold border-b-2 transition-all ${
+            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-t-lg text-xs font-semibold border-b-2 whitespace-nowrap transition-all ${
               activeTab === 'disagreements'
                 ? 'border-accent text-accent bg-surface'
                 : 'border-transparent text-content-secondary hover:text-content-primary'
             }`}
           >
-            <ArrowRightLeft className="w-4 h-4" />
-            <span>4. Disagreement Investigations ({disagreements.length})</span>
+            <ArrowRightLeft className="w-3.5 h-3.5" />
+            <span>Disagreements ({disagreements.length})</span>
           </button>
 
           <button
             onClick={() => setActiveTab('gaps')}
-            className={`flex items-center space-x-2 px-4 py-2 rounded-t-lg text-sm font-semibold border-b-2 transition-all ${
+            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-t-lg text-xs font-semibold border-b-2 whitespace-nowrap transition-all ${
               activeTab === 'gaps'
                 ? 'border-accent text-accent bg-surface'
                 : 'border-transparent text-content-secondary hover:text-content-primary'
             }`}
           >
-            <Sparkles className="w-4 h-4" />
-            <span>5. Gap Explorer & Falsification ({gaps.length})</span>
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>Gaps & Falsification ({gaps.length})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('timeline')}
+            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-t-lg text-xs font-semibold border-b-2 whitespace-nowrap transition-all ${
+              activeTab === 'timeline'
+                ? 'border-accent text-accent bg-surface'
+                : 'border-transparent text-content-secondary hover:text-content-primary'
+            }`}
+          >
+            <Clock className="w-3.5 h-3.5 text-accent" />
+            <span>Evidence Timeline ({evolutionEvents.length})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('lineages')}
+            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-t-lg text-xs font-semibold border-b-2 whitespace-nowrap transition-all ${
+              activeTab === 'lineages'
+                ? 'border-accent text-accent bg-surface'
+                : 'border-transparent text-content-secondary hover:text-content-primary'
+            }`}
+          >
+            <GitCompare className="w-3.5 h-3.5 text-secondary" />
+            <span>Preprint Lineage ({lineages.length})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('retractions')}
+            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-t-lg text-xs font-semibold border-b-2 whitespace-nowrap transition-all ${
+              activeTab === 'retractions'
+                ? 'border-accent text-accent bg-surface'
+                : 'border-transparent text-content-secondary hover:text-content-primary'
+            }`}
+          >
+            <ShieldAlert className="w-3.5 h-3.5 text-red-400" />
+            <span>Retractions ({retractionAlerts.length})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('datasets')}
+            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-t-lg text-xs font-semibold border-b-2 whitespace-nowrap transition-all ${
+              activeTab === 'datasets'
+                ? 'border-accent text-accent bg-surface'
+                : 'border-transparent text-content-secondary hover:text-content-primary'
+            }`}
+          >
+            <Database className="w-3.5 h-3.5 text-accent" />
+            <span>Datasets ({datasets.length})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('cross-domain')}
+            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-t-lg text-xs font-semibold border-b-2 whitespace-nowrap transition-all ${
+              activeTab === 'cross-domain'
+                ? 'border-accent text-accent bg-surface'
+                : 'border-transparent text-content-secondary hover:text-content-primary'
+            }`}
+          >
+            <Shuffle className="w-3.5 h-3.5 text-purple-400" />
+            <span>Cross-Domain ({crossDomains.length})</span>
           </button>
         </div>
 
@@ -447,6 +575,35 @@ export default function WorkspacePage() {
             onFalsify={handleFalsifyGap}
             onPlanExperiment={handlePlanExperiment}
           />
+        )}
+
+        {/* Tab 6: Evidence Evolution Timeline */}
+        {activeTab === 'timeline' && activeSession && (
+          <TimelineEvolutionView
+            sessionId={activeSession.id}
+            events={evolutionEvents}
+            onCheckEvolution={handleCheckEvolution}
+          />
+        )}
+
+        {/* Tab 7: Preprint-to-Publication Lineages */}
+        {activeTab === 'lineages' && (
+          <PreprintLineageView lineages={lineages} />
+        )}
+
+        {/* Tab 8: Retraction & Correction Alerts */}
+        {activeTab === 'retractions' && (
+          <RetractionAlertsView alerts={retractionAlerts} />
+        )}
+
+        {/* Tab 9: Accessible Benchmark Datasets */}
+        {activeTab === 'datasets' && (
+          <DatasetExplorerView datasets={datasets} />
+        )}
+
+        {/* Tab 10: Cross-Domain Connections */}
+        {activeTab === 'cross-domain' && (
+          <CrossDomainView connections={crossDomains} />
         )}
       </main>
     </div>

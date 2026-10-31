@@ -308,3 +308,4 @@ CREATE POLICY "Users can access proposed experiments" ON proposed_experiments
 
 CREATE POLICY "Users can access processing jobs" ON processing_jobs
     FOR ALL USING (true);
+
