@@ -336,4 +336,16 @@ npm test
 
 <div align="center">
   <p><strong>PaperTrail Research Intelligence</strong> — Engineered for deep inquiry, verifiable evidence, and accelerated scientific discovery.</p>
+## Contributors
+
+This project was developed during a hackathon through the collaborative efforts of the following contributors.
+
+| Contribution | GitHub Profile |
+|:---|:---|
+| UI / Frontend Development | [roshvik-bit](https://github.com/roshvik-bit) |
+| Backend Development | [umeshadabala](https://github.com/umeshadabala) |
+
+**Project Repository:** [PaperTrail](https://github.com/umeshadabala/PaperTrail)
+
+We appreciate the time, effort, and collaboration that went into building this project.
 </div>
